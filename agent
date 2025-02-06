@@ -1,0 +1,754 @@
+#!/bin/python3
+
+import asyncio
+import sqlite3
+import os
+import json
+import aiohttp
+from dataclasses import dataclass
+from typing import Optional, List, Dict, Any
+from datetime import datetime
+import logging
+from enum import Enum
+
+
+class OperationType(Enum):
+    READ = "read"
+    WRITE = "write"
+    DELETE = "delete"
+    MODIFY = "modify"
+
+
+@dataclass
+class Operation:
+    type: OperationType
+    description: str
+    requires_confirmation: bool
+
+
+class Logger:
+    """Simple logging utility for the NL Command Tool."""
+
+    def __init__(self, shell_pid: int):
+        self.log_file = f"/tmp/nlcommand_{shell_pid}.log"
+        self._configure_logging()
+
+    def _configure_logging(self):
+        logging.basicConfig(
+            filename=self.log_file,
+            level=logging.INFO,
+            format='%(asctime)s - %(levelname)s - %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S'
+        )
+
+        # Also log to console for ERROR and above
+        console = logging.StreamHandler()
+        console.setLevel(logging.ERROR)
+        formatter = logging.Formatter('%(levelname)s: %(message)s')
+        console.setFormatter(formatter)
+        logging.getLogger('').addHandler(console)
+
+    def info(self, message: str):
+        logging.info(message)
+
+    def error(self, message: str):
+        logging.error(message)
+
+    def warning(self, message: str):
+        logging.warning(message)
+
+
+class SecurityManager:
+    def __init__(self, logger: Logger):
+        self.logger = logger
+        self.config_path = os.path.expanduser("~/.nlcommand/security.json")
+        self.dangerous_operations = self._load_security_config()
+
+    def _load_security_config(self) -> Dict[str, Operation]:
+        self.logger.info(f"Loading security config from {self.config_path}")
+        if not os.path.exists(self.config_path):
+            return self._create_default_config()
+        with open(self.config_path, 'r') as f:
+            config_dict = json.load(f)
+        return {k: self._dict_to_operation(v) for k, v in config_dict.items()}
+
+    def _operation_to_dict(self, operation: Operation) -> dict:
+        """Convert Operation object to dictionary for JSON serialization."""
+        return {
+            "type": operation.type.value,  # Convert enum to string
+            "description": operation.description,
+            "requires_confirmation": operation.requires_confirmation
+        }
+
+    def _dict_to_operation(self, data: dict) -> Operation:
+        """Convert dictionary back to Operation object."""
+        return Operation(
+            type=OperationType(data["type"]),  # Convert string back to enum
+            description=data["description"],
+            requires_confirmation=data["requires_confirmation"]
+        )
+
+    def _create_default_config(self) -> Dict[str, Operation]:
+        default_config = {
+            "delete": Operation(
+                type=OperationType.DELETE,
+                description="Delete files or directories",
+                requires_confirmation=True
+            ),
+            "modify": Operation(
+                type=OperationType.MODIFY,
+                description="Modify existing files",
+                requires_confirmation=True
+            )
+        }
+
+        # Convert to dictionary for JSON serialization
+        config_dict = {
+            key: self._operation_to_dict(op)
+            for key, op in default_config.items()
+        }
+
+        os.makedirs(os.path.dirname(self.config_path), exist_ok=True)
+        with open(self.config_path, 'w') as f:
+            json.dump(config_dict, f, indent=2)
+
+        return default_config
+
+
+class ContextManager:
+    def __init__(self, shell_pid: int, logger: Logger,
+                 max_context_length: int = 4000):
+        self.shell_pid = shell_pid
+        self.logger = logger
+        self.db_path = os.path.expanduser(
+            f"~/.nlcommand/context_{shell_pid}.db")
+        self.max_context_length = max_context_length
+        self.current_context_length = 0
+        self._init_db()
+        self._cleanup_old_contexts()
+
+    def _init_db(self):
+        os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS command_history (
+                    id INTEGER PRIMARY KEY,
+                    timestamp TEXT,
+                    command TEXT,
+                    result TEXT,
+                    status TEXT,
+                    token_count INTEGER,
+                    last_accessed TEXT
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS context_vars (
+                    key TEXT PRIMARY KEY,
+                    value TEXT,
+                    timestamp TEXT,
+                    last_accessed TEXT
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS context_metadata (
+                    shell_pid INTEGER PRIMARY KEY,
+                    created_at TEXT,
+                    last_accessed TEXT,
+                    total_tokens INTEGER DEFAULT 0
+                )
+            """)
+
+            # Initialize metadata for this context
+            conn.execute("""
+                INSERT OR IGNORE INTO context_metadata (shell_pid, created_at, last_accessed, total_tokens)
+                VALUES (?, ?, ?, 0)
+            """, (self.shell_pid, datetime.now().isoformat(),
+                  datetime.now().isoformat()))
+
+        self._update_last_accessed()
+        self._cleanup_old_contexts()
+
+    def _cleanup_old_contexts(self, max_age_hours: int = 24):
+        """Cleanup context DBs that haven't been accessed in the specified time."""
+        try:
+            db_dir = os.path.dirname(self.db_path)
+            current_time = datetime.now()
+
+            for filename in os.listdir(db_dir):
+                if filename.startswith("context_") and filename.endswith(".db"):
+                    db_path = os.path.join(db_dir, filename)
+                    try:
+                        with sqlite3.connect(db_path) as conn:
+                            cursor = conn.execute(
+                                "SELECT shell_pid, last_accessed FROM context_metadata LIMIT 1"
+                            )
+                            row = cursor.fetchone()
+                            if row:
+                                last_accessed = datetime.fromisoformat(row[1])
+                                if (current_time - last_accessed).total_seconds() > max_age_hours * 3600:
+                                    # Check if the shell is still running
+                                    try:
+                                        os.kill(row[0], 0)
+                                    except OSError:
+                                        # Process doesn't exist, safe to remove the DB
+                                        os.remove(db_path)
+                                        logging.info(
+                                            f"Removed old context DB: {filename}")
+                    except sqlite3.Error as e:
+                        logging.error(f"Error accessing DB {filename}: {e}")
+                        # If DB is corrupted, remove it
+                        os.remove(db_path)
+        except Exception as e:
+            logging.error(f"Error during context cleanup: {e}")
+
+    def _update_last_accessed(self):
+        """Update the last_accessed timestamp for this context."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                "UPDATE context_metadata SET last_accessed = ? WHERE shell_pid = ?",
+                (datetime.now().isoformat(), self.shell_pid)
+            )
+
+    def update_token_count(self, tokens_used: int):
+        """Update the total token count and check if we're approaching the limit."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                "UPDATE context_metadata SET total_tokens = total_tokens + ? WHERE shell_pid = ?",
+                (tokens_used, self.shell_pid)
+            )
+            cursor = conn.execute(
+                "SELECT total_tokens FROM context_metadata WHERE shell_pid = ?",
+                (self.shell_pid,)
+            )
+            total_tokens = cursor.fetchone()[0]
+
+            if total_tokens >= self.max_context_length * 0.8:  # 80% warning threshold
+                return "warning"
+            elif total_tokens >= self.max_context_length:
+                # Remove oldest entries until we're under 80% capacity
+                target_tokens = int(self.max_context_length * 0.8)
+                while total_tokens > target_tokens:
+                    cursor = conn.execute(
+                        "SELECT id, token_count FROM command_history ORDER BY id ASC LIMIT 1"
+                    )
+                    row = cursor.fetchone()
+                    if not row:
+                        break
+                    conn.execute(
+                        "DELETE FROM command_history WHERE id = ?", (row[0],))
+                    total_tokens -= row[1]
+                conn.execute(
+                    "UPDATE context_metadata SET total_tokens = ? WHERE shell_pid = ?",
+                    (total_tokens, self.shell_pid)
+                )
+                return "truncated"
+            return "ok"
+
+    def store_command(self, command: str, result: str, status: str):
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                "INSERT INTO command_history "
+                "(timestamp, command, result, status) VALUES (?, ?, ?, ?)",
+                (datetime.now().isoformat(), command, result, status)
+            )
+
+    def get_last_command(self) -> Optional[Dict[str, Any]]:
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute(
+                "SELECT * FROM command_history ORDER BY id DESC"
+            )
+            row = cursor.fetchone()
+            if row:
+                return {
+                    "id": row[0],
+                    "timestamp": row[1],
+                    "command": row[2],
+                    "result": row[3],
+                    "status": row[4]
+                }
+        return None
+
+
+class NotificationManager:
+    def __init__(self, logger: Logger):
+        self.logger = logger
+        self.notification_queue = asyncio.Queue()
+        self.logger.info("Initialized notification manager")
+
+    async def notify(self, message: str, level: str = "info"):
+        await self.notification_queue.put({
+            "message": message,
+            "level": level,
+            "timestamp": datetime.now().isoformat()
+        })
+
+    async def process_notifications(self):
+        while True:
+            notification = await self.notification_queue.get()
+            # For MVP: Simple print to terminal
+            print(
+                f"\n[{notification['level'].upper()}] {notification['message']}")
+            self.notification_queue.task_done()
+
+
+class LLMClient:
+    def __init__(self, logger: Logger,
+                 api_url: str = "http://localhost:1234/v1"):
+        self.api_url = api_url
+        self.logger = logger
+        self.functions = self._define_functions()
+        # Session should be initialized and closed properly
+        self.session = None
+
+    async def __aenter__(self):
+        import aiohttp
+        self.session = aiohttp.ClientSession()
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        if self.session:
+            await self.session.close()
+
+    def _define_functions(self) -> List[Dict[str, Any]]:
+        return [
+            {
+                "type": "function",
+                "function": {
+                    "name": "create_file",
+                    "description": "Create a new empty file",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "path": {"type": "string", "description": "Path to the file"},
+                        },
+                        "required": ["path"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "read_file",
+                    "description": "Read contents of a file from anywhere on the system",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "path": {"type": "string", "description": "Path to the file"},
+                        },
+                        "required": ["path"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "delete_file",
+                    "description": "Delete a file",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "path": {"type": "string", "description": "Path to the file"},
+                        },
+                        "required": ["path"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "delete_directory",
+                    "description": "Delete a directory and its contents",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "path": {"type": "string", "description": "Path to the directory"},
+                        },
+                        "required": ["path"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "copy_file",
+                    "description": "Copy a file from source to destination",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "source": {"type": "string", "description": "Source file path"},
+                            "destination": {"type": "string", "description": "Destination path"}
+                        },
+                        "required": ["source", "destination"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "move_file",
+                    "description": "Move a file from source to destination",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "source": {"type": "string", "description": "Source file path"},
+                            "destination": {"type": "string", "description": "Destination path"}
+                        },
+                        "required": ["source", "destination"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "compile_code",
+                    "description": "Compile source code using gcc/g++",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "source": {"type": "string", "description": "Source file path"},
+                            "output": {"type": "string", "description": "Output file path"},
+                            "compiler": {"type": "string", "enum": ["gcc", "g++"], "description": "Compiler to use"},
+                            "flags": {"type": "array", "items": {"type": "string"}, "description": "Compiler flags"}
+                        },
+                        "required": ["source", "output", "compiler"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "fetch_url",
+                    "description": "Fetch content from a URL using curl",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "url": {"type": "string", "description": "URL to fetch"},
+                            "output": {"type": "string", "description": "Output file path (optional)"},
+                            "headers": {
+                                "type": "object",
+                                "description": "HTTP headers to include"
+                            }
+                        },
+                        "required": ["url"]
+                    }
+                }
+            }
+        ]
+
+    async def process_command(self, command: str, context: List[Dict[str, str]]) -> Dict[str, Any]:
+        """Process a command through the LLM."""
+        try:
+            # Construct the API request
+            request = {
+                "model": "lmstudio-community/llama-3.2-3b-instruct",
+                # "messages": context + [{"role": "user", "content": command}],
+                "messages": context,
+                "tools": self.functions,
+                "function_call": "auto",
+                "temperature": 0.7,
+                "max_tokens": 4096
+            }
+
+            self.logger.info(f"Sending request to LLM API: {
+                             json.dumps(request, indent=2)}")
+
+            # Make the API call
+            async with self.session.post(
+                f"{self.api_url}/chat/completions",
+                json=request,
+                headers={"Content-Type": "application/json"}
+            ) as response:
+                if response.status != 200:
+                    error_text = await response.text()
+                    self.logger.error(
+                        f"LLM API error (Status "
+                        f"{response.status}): {error_text}")
+                    raise Exception(f"LLM API error: {error_text}")
+
+                result = await response.json()
+                self.logger.info(
+                    f"Received response from LLM: "
+                    f"{json.dumps(result, indent=2)}")
+
+                # Extract content or function call from response
+                message = result["choices"][0]["message"]
+                if "tool_calls" in message:
+                    # @todo Iterate all tool calls for multiple functions.
+                    tool_calls = message["tool_calls"]
+                    response_data = {
+                        "action": tool_calls[0]["function"]["name"],
+                        "parameters": json.loads(
+                            tool_calls[0]["function"]["arguments"]),
+                        "usage": result.get("usage", {})
+                    }
+
+                    self.logger.info(
+                        f"Processed command into action: "
+                        f"{response_data['action']} with parameters: "
+                        f"{response_data['parameters']}")
+                elif "content" in message:
+                    response_data = {
+                        "content": message["content"],
+                        "usage": result.get("usage", {})
+                    }
+                return response_data
+
+        except aiohttp.ClientError as e:
+            error_msg = f"Network error communicating with LLM: {str(e)}"
+            self.logger.error(error_msg)
+            raise Exception(error_msg)
+        except json.JSONDecodeError as e:
+            error_msg = f"Invalid JSON in LLM response: {str(e)}"
+            self.logger.error(error_msg)
+            raise Exception(error_msg)
+        except KeyError as e:
+            error_msg = f"Unexpected LLM response format: {str(e)}"
+            self.logger.error(error_msg)
+            raise Exception(error_msg)
+        except Exception as e:
+            error_msg = f"Error processing command through LLM: {str(e)}"
+            self.logger.error(error_msg)
+            raise Exception(error_msg)
+
+
+class CommandExecutor:
+    """Executes system commands safely."""
+
+    def __init__(self, logger: Logger):
+        self.logger = logger
+
+    async def execute(self, command: List[str], timeout: int = 30) -> Dict[str, Any]:
+        cmd_str = ' '.join(command)
+        self.logger.info(f"Executing command: {cmd_str}")
+
+        try:
+            process = await asyncio.create_subprocess_exec(
+                *command,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+
+            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout)
+            result = {
+                "success": process.returncode == 0,
+                "stdout": stdout.decode(),
+                "stderr": stderr.decode(),
+                "return_code": process.returncode
+            }
+
+            if not result["success"]:
+                self.logger.error(f"Command failed: {
+                                  cmd_str}\nError: {result['stderr']}")
+            else:
+                self.logger.info(f"Command completed successfully: {cmd_str}")
+
+            return result
+
+        except asyncio.TimeoutError:
+            self.logger.error(f"Command timed out: {cmd_str}")
+            process.kill()
+            return {
+                "success": False,
+                "error": f"Command timed out after {timeout} seconds"
+            }
+        except Exception as e:
+            self.logger.error(f"Error executing command {cmd_str}: {str(e)}")
+            return {
+                "success": False,
+                "error": str(e)
+            }
+
+
+class SystemCommands:
+    """Implements system commands using the CommandExecutor."""
+
+    def __init__(self, logger: Logger):
+        self.executor = CommandExecutor(logger)
+        self.logger = logger
+
+    async def create_file(self, path: str) -> Dict[str, Any]:
+        return await self.executor.execute(["touch", path])
+
+    async def read_file(self, path: str) -> Dict[str, Any]:
+        return await self.executor.execute(["cat", path])
+
+    async def delete_file(self, path: str) -> Dict[str, Any]:
+        return await self.executor.execute(["rm", path])
+
+    async def delete_directory(self, path: str) -> Dict[str, Any]:
+        return await self.executor.execute(["rm", "-r", path])
+
+    async def copy_file(self, source: str, destination: str) -> Dict[str, Any]:
+        return await self.executor.execute(["cp", source, destination])
+
+    async def move_file(self, source: str, destination: str) -> Dict[str, Any]:
+        return await self.executor.execute(["mv", source, destination])
+
+    async def compile_code(self, source: str, output: str, compiler: str, flags: List[str] = None) -> Dict[str, Any]:
+        command = [compiler, source, "-o", output]
+        if flags:
+            command.extend(flags)
+        return await self.executor.execute(command)
+
+    async def fetch_url(self, url: str, output: str = None, headers: Dict[str, str] = None) -> Dict[str, Any]:
+        command = ["curl"]
+        if headers:
+            for key, value in headers.items():
+                command.extend(["-H", f"{key}: {value}"])
+        if output:
+            command.extend(["-o", output])
+        command.append(url)
+        return await self.executor.execute(command)
+
+
+class NLCommandTool:
+    def __init__(self, max_context_length: int = 4000):
+        self.shell_pid = os.getpid()
+        self.logger = Logger(self.shell_pid)
+        self.context_manager = ContextManager(
+            self.shell_pid, self.logger, max_context_length)
+        self.security_manager = SecurityManager(self.logger)
+        self.notification_manager = NotificationManager(self.logger)
+        self.llm_client = None  # Will be initialized in setup()
+        self.system_commands = SystemCommands(self.logger)
+
+    async def setup(self):
+        self.llm_client = await LLMClient(self.logger).__aenter__()
+
+    async def cleanup(self):
+        if self.llm_client:
+            await self.llm_client.__aexit__(None, None, None)
+
+    async def process_command(self, command: str, is_recursive: bool = False,
+                              context: List[Dict[str, str]] = None):
+        try:
+            # Initialize context if not provided
+            if context is None:
+                context = [{
+                    "role": "system",
+                    "content": ("You are a linux technical helper. You "
+                                "have access to a set of tools to help "
+                                "the user with their requests.")
+                }]
+
+                # Only add previous context if this isn't a recursive call
+                if not is_recursive:
+                    last_command = self.context_manager.get_last_command()
+                    if last_command and last_command["command"] != command:
+                        context.append({
+                            "role": "user",
+                            "content": last_command["command"]
+                        })
+                        if last_command["result"]:
+                            context.append({
+                                "role": "assistant",
+                                "content": last_command["result"]
+                            })
+
+                    # Add current command to context
+                    context.append({
+                        "role": "user",
+                        "content": command
+                    })
+
+            # Process through LLM
+            llm_response = await self.llm_client.process_command(command, context)
+
+            if "action" in llm_response:
+                # Security check
+                operation = self.security_manager.dangerous_operations.get(
+                    llm_response["action"]
+                )
+                if operation and operation.requires_confirmation:
+                    if not await self._get_user_confirmation(operation):
+                        return "Operation cancelled by user"
+
+                # Execute command
+                result = await self._execute_command(llm_response)
+
+                # Add tool result to context
+                context.append({
+                    "role": "assistant",
+                    "content": f"I executed the {llm_response['action']} command."
+                })
+                context.append({
+                    "role": "user",
+                    "content": f"Command result: {str(result)}"
+                })
+
+                # Store only the final result in context manager
+                final_response = await self.process_command(
+                    "Please interpret these results and continue helping the user.",
+                    is_recursive=True,
+                    context=context  # Pass the current context
+                )
+                self.context_manager.store_command(
+                    command, final_response, "success")
+                return final_response
+
+            elif "content" in llm_response:
+                # Store in context
+                result = llm_response["content"]
+                self.context_manager.store_command(
+                    command, result, "success")
+                return result
+
+        except Exception as e:
+            await self.notification_manager.notify(
+                f"Error processing command: {str(e)}", "error"
+            )
+            return f"Error: {str(e)}"
+
+    async def _execute_command(self, parsed_command: Dict[str, Any]):
+        action = parsed_command["action"]
+        params = parsed_command["parameters"]
+
+        # Map actions to system commands
+        command_map = {
+            "create_file": self.system_commands.create_file,
+            "read_file": self.system_commands.read_file,
+            "delete_file": self.system_commands.delete_file,
+            "delete_directory": self.system_commands.delete_directory,
+            "copy_file": self.system_commands.copy_file,
+            "move_file": self.system_commands.move_file,
+            "compile_code": self.system_commands.compile_code,
+            "fetch_url": self.system_commands.fetch_url,
+        }
+
+        if action not in command_map:
+            raise ValueError(f"Unknown action: {action}")
+
+        return await command_map[action](**params)
+
+    async def _get_user_confirmation(self, operation: Operation) -> bool:
+        print(f"\nWarning: About to perform {operation.description}")
+        loop = asyncio.get_event_loop()
+        response = await loop.run_in_executor(
+            None, input, "Are you sure? (y/N): ")
+        return response.lower() == 'y'
+
+
+async def main():
+    tool = NLCommandTool()
+    await tool.setup()  # Initialize the LLM client
+    notification_task = asyncio.create_task(
+        tool.notification_manager.process_notifications()
+    )
+
+    try:
+        while True:
+            command = input("nl> ")
+            if command.lower() in ['exit', 'quit']:
+                break
+            result = await tool.process_command(command)
+            print(result)
+    finally:
+        notification_task.cancel()
+        await tool.cleanup()  # Clean up the LLM client
+        try:
+            await notification_task
+        except asyncio.CancelledError:
+            pass
+
+if __name__ == "__main__":
+    asyncio.run(main())

@@ -160,7 +160,8 @@ class ContextManager:
 
             # Initialize metadata for this context
             conn.execute("""
-                INSERT OR IGNORE INTO context_metadata (shell_pid, created_at, last_accessed, total_tokens)
+                INSERT OR IGNORE INTO context_metadata
+                (shell_pid, created_at, last_accessed, total_tokens)
                 VALUES (?, ?, ?, 0)
             """, (self.shell_pid, datetime.now().isoformat(),
                   datetime.now().isoformat()))
@@ -180,17 +181,21 @@ class ContextManager:
                     try:
                         with sqlite3.connect(db_path) as conn:
                             cursor = conn.execute(
-                                "SELECT shell_pid, last_accessed FROM context_metadata LIMIT 1"
+                                "SELECT shell_pid, last_accessed "
+                                "FROM context_metadata LIMIT 1"
                             )
                             row = cursor.fetchone()
                             if row:
                                 last_accessed = datetime.fromisoformat(row[1])
-                                if (current_time - last_accessed).total_seconds() > max_age_hours * 3600:
+                                age_in_seconds = (
+                                    current_time - last_accessed).total_seconds()
+                                if age_in_seconds > max_age_hours * 3600:
                                     # Check if the shell is still running
                                     try:
                                         os.kill(row[0], 0)
                                     except OSError:
-                                        # Process doesn't exist, safe to remove the DB
+                                        # Process doesn't exist, safe to remove
+                                        # the DB
                                         os.remove(db_path)
                                         logging.info(
                                             f"Removed old context DB: {filename}")
@@ -213,7 +218,9 @@ class ContextManager:
         """Update the total token count and check if we're approaching the limit."""
         with sqlite3.connect(self.db_path) as conn:
             conn.execute(
-                "UPDATE context_metadata SET total_tokens = total_tokens + ? WHERE shell_pid = ?",
+                "UPDATE context_metadata "
+                "SET total_tokens = total_tokens + ? "
+                "WHERE shell_pid = ?",
                 (tokens_used, self.shell_pid)
             )
             cursor = conn.execute(
@@ -400,6 +407,35 @@ class LLMClient:
             {
                 "type": "function",
                 "function": {
+                    "name": "check_path_exists",
+                    "description": "Check the existence of a file/folder",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "path": {"type": "string", "description": "Path to the file/folder to check for existence"}
+                        },
+                        "required": ["path"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "last_n_lines",
+                    "description": "Read specified number of lines from a file",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "path": {"type": "string", "description": "Path to the file from which to read"},
+                            "count": {"type": "number", "description": "Number of lines from the end of the file"}
+                        },
+                        "required": ["path"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
                     "name": "compile_code",
                     "description": "Compile source code using gcc/g++",
                     "parameters": {
@@ -435,22 +471,26 @@ class LLMClient:
             }
         ]
 
-    async def process_command(self, command: str, context: List[Dict[str, str]]) -> Dict[str, Any]:
+    async def process_command(self, context: List[Dict[str, str]]) -> Dict[str, Any]:
         """Process a command through the LLM."""
         try:
             # Construct the API request
             request = {
-                "model": "lmstudio-community/llama-3.2-3b-instruct",
-                # "messages": context + [{"role": "user", "content": command}],
+                "model": "local-model",
                 "messages": context,
-                "tools": self.functions,
                 "function_call": "auto",
                 "temperature": 0.7,
                 "max_tokens": 4096
             }
 
-            self.logger.info(f"Sending request to LLM API: {
-                             json.dumps(request, indent=2)}")
+            # If the most recent chat in the conversation is the tool's
+            # response then do not add the tool list.
+            if len(context) and context[-1]["role"] != "tool":
+                request["tools"] = self.functions
+
+            self.logger.info(
+                f"Sending request to LLM API: {json.dumps(request, indent=2)}"
+            )
 
             # Make the API call
             async with self.session.post(
@@ -494,7 +534,9 @@ class LLMClient:
                 return response_data
 
         except aiohttp.ClientError as e:
-            error_msg = f"Network error communicating with LLM: {str(e)}"
+            error_msg = (
+                f"Network error communicating with LLM: {str(e)}"
+            )
             self.logger.error(error_msg)
             raise Exception(error_msg)
         except json.JSONDecodeError as e:
@@ -537,8 +579,9 @@ class CommandExecutor:
             }
 
             if not result["success"]:
-                self.logger.error(f"Command failed: {
-                                  cmd_str}\nError: {result['stderr']}")
+                self.logger.error(
+                    f"Command failed: {cmd_str}\nError: {result['stderr']}"
+                )
             else:
                 self.logger.info(f"Command completed successfully: {cmd_str}")
 
@@ -584,13 +627,25 @@ class SystemCommands:
     async def move_file(self, source: str, destination: str) -> Dict[str, Any]:
         return await self.executor.execute(["mv", source, destination])
 
-    async def compile_code(self, source: str, output: str, compiler: str, flags: List[str] = None) -> Dict[str, Any]:
+    async def check_path_exists(self, path: str) -> Dict[str, Any]:
+        return await self.executor.execute(["ls -l | grep", path])
+
+    async def last_n_lines(self, path: str, count: int) -> Dict[str, Any]:
+        return await self.executor.execute("tail -n", f"{count}", path)
+
+    async def compile_code(
+        self, source: str, output: str, compiler: str,
+        flags: List[str] = None
+    ) -> Dict[str, Any]:
         command = [compiler, source, "-o", output]
         if flags:
             command.extend(flags)
         return await self.executor.execute(command)
 
-    async def fetch_url(self, url: str, output: str = None, headers: Dict[str, str] = None) -> Dict[str, Any]:
+    async def fetch_url(
+        self, url: str, output: str = None,
+        headers: Dict[str, str] = None
+    ) -> Dict[str, Any]:
         command = ["curl"]
         if headers:
             for key, value in headers.items():
@@ -619,16 +674,19 @@ class NLCommandTool:
         if self.llm_client:
             await self.llm_client.__aexit__(None, None, None)
 
-    async def process_command(self, command: str, is_recursive: bool = False,
-                              context: List[Dict[str, str]] = None):
+    async def process_command(
+        self, command: str, is_recursive: bool = False,
+        context: List[Dict[str, str]] = None
+    ):
         try:
             # Initialize context if not provided
             if context is None:
                 context = [{
                     "role": "system",
-                    "content": ("You are a linux technical helper. You "
-                                "have access to a set of tools to help "
-                                "the user with their requests.")
+                    "content": (
+                        "You are a linux technical helper. You have access to a set of tools "
+                        "to help the user with their requests."
+                    )
                 }]
 
                 # Only add previous context if this isn't a recursive call
@@ -652,7 +710,7 @@ class NLCommandTool:
                     })
 
             # Process through LLM
-            llm_response = await self.llm_client.process_command(command, context)
+            llm_response = await self.llm_client.process_command(context)
 
             if "action" in llm_response:
                 # Security check
@@ -669,11 +727,29 @@ class NLCommandTool:
                 # Add tool result to context
                 context.append({
                     "role": "assistant",
-                    "content": f"I executed the {llm_response['action']} command."
+                    "function_call": {
+                        "name": llm_response["action"],
+                        "arguments": llm_response["parameters"]
+                    }
                 })
+
+                print(result)
+
+                # Extract the tool output
+                status = result["success"]
+                tool_output = result["stdout"]
+
+                if not status:
+                    tool_output = tool_output + result["stderr"]
+
+                if len(tool_output) == 0:
+                    tool_output = (
+                        f"Operation {'success' if status else 'failed'}")
+
+                # Append the tool output to the conversation.
                 context.append({
-                    "role": "user",
-                    "content": f"Command result: {str(result)}"
+                    "role": "tool",
+                    "content": tool_output
                 })
 
                 # Store only the final result in context manager
@@ -711,6 +787,8 @@ class NLCommandTool:
             "delete_directory": self.system_commands.delete_directory,
             "copy_file": self.system_commands.copy_file,
             "move_file": self.system_commands.move_file,
+            "check_path_exists": self.system_commands.check_path_exists,
+            "last_n_lines": self.system_commands.last_n_lines,
             "compile_code": self.system_commands.compile_code,
             "fetch_url": self.system_commands.fetch_url,
         }

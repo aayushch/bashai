@@ -11,6 +11,7 @@ from datetime import datetime
 import logging
 from enum import Enum
 import sys
+import psutil
 
 
 class OperationType(Enum):
@@ -193,13 +194,13 @@ class ContextManager:
                                 if age_in_seconds > max_age_hours * 3600:
                                     # Check if the shell is still running
                                     try:
-                                        os.kill(row[0], 0)
-                                    except OSError:
-                                        # Process doesn't exist, safe to remove
-                                        # the DB
-                                        os.remove(db_path)
-                                        logging.info(
-                                            f"Removed old context DB: {filename}")
+                                        if not psutil.pid_exists(row[0]):
+                                            os.remove(db_path)
+                                            logging.info(
+                                                f"Removed old context DB: {filename}")
+                                    except Exception as e:
+                                        logging.error(
+                                            f"Error checking process: {e}")
                     except sqlite3.Error as e:
                         logging.error(f"Error accessing DB {filename}: {e}")
                         # If DB is corrupted, remove it
@@ -275,6 +276,17 @@ class ContextManager:
                     "status": row[4]
                 }
         return None
+
+    def remove_current_db(self):
+        """Remove the current context database file."""
+        try:
+            if os.path.exists(self.db_path):
+                os.remove(self.db_path)
+                self.logger.info(
+                    f"Removed current context DB: {self.db_path}")
+        except Exception as e:
+            self.logger.error(
+                f"Error removing current context DB: {e}")
 
 
 class NotificationManager:
@@ -629,10 +641,10 @@ class SystemCommands:
         return await self.executor.execute(["mv", source, destination])
 
     async def check_path_exists(self, path: str) -> Dict[str, Any]:
-        return await self.executor.execute(["ls -l | grep", path])
+        return await self.executor.execute(["ls", "-l", path])
 
     async def last_n_lines(self, path: str, count: int) -> Dict[str, Any]:
-        return await self.executor.execute("tail -n", f"{count}", path)
+        return await self.executor.execute(["tail", "-n", f"{count}", path])
 
     async def compile_code(
         self, source: str, output: str, compiler: str,
@@ -815,10 +827,14 @@ async def main():
     try:
         # Command-line mode if arguments are provided
         if len(sys.argv) > 1:
-            command = ' '.join(sys.argv[1:])
-            result = await tool.process_command(command)
-            print(result)
-            return
+            if sys.argv[1] == "--":
+                if sys.argv[2] == "--clean":
+                    pass  # @todo cleanup existing db
+            else:
+                command = ' '.join(sys.argv[1:])
+                result = await tool.process_command(command)
+                print(result)
+                return
 
         # Interactive shell mode
         while True:

@@ -1,0 +1,32 @@
+{
+  "delete_file": {
+    "type": "delete",
+    "description": "Delete a single file from the system",
+    "requires_confirmation": true
+  },
+  "delete_directory": {
+    "type": "delete",
+    "description": "Delete a directory and all its contents recursively",
+    "requires_confirmation": true
+  },
+  "move_file": {
+    "type": "modify",
+    "description": "Move/rename a file or directory",
+    "requires_confirmation": true
+  },
+  "modify": {
+    "type": "modify",
+    "description": "Modify contents of existing files",
+    "requires_confirmation": true
+  },
+  "compile_code": {
+    "type": "modify",
+    "description": "Compile source code which creates executable files",
+    "requires_confirmation": true
+  },
+  "fetch_url": {
+    "type": "write",
+    "description": "Download content from the internet",
+    "requires_confirmation": true
+  }
+}

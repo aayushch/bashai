@@ -10,6 +10,7 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime
 import logging
 from enum import Enum
+import sys
 
 
 class OperationType(Enum):
@@ -658,7 +659,7 @@ class SystemCommands:
 
 class NLCommandTool:
     def __init__(self, max_context_length: int = 4000):
-        self.shell_pid = os.getpid()
+        self.shell_pid = os.getppid()
         self.logger = Logger(self.shell_pid)
         self.context_manager = ContextManager(
             self.shell_pid, self.logger, max_context_length)
@@ -732,8 +733,6 @@ class NLCommandTool:
                         "arguments": llm_response["parameters"]
                     }
                 })
-
-                print(result)
 
                 # Extract the tool output
                 status = result["success"]
@@ -814,6 +813,14 @@ async def main():
     )
 
     try:
+        # Command-line mode if arguments are provided
+        if len(sys.argv) > 1:
+            command = ' '.join(sys.argv[1:])
+            result = await tool.process_command(command)
+            print(result)
+            return
+
+        # Interactive shell mode
         while True:
             command = input("nl> ")
             if command.lower() in ['exit', 'quit']:

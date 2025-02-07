@@ -1,120 +1,20 @@
 #!/bin/python3
 
+from typing import Optional, List, Dict, Any
+from datetime import datetime
+
+from Logger import Logger
+from Security import SecurityManager, Operation
+from SystemIntegration import Functions, SystemCommands
+
 import asyncio
 import sqlite3
 import os
 import json
 import aiohttp
-from dataclasses import dataclass
-from typing import Optional, List, Dict, Any
-from datetime import datetime
 import logging
-from enum import Enum
 import sys
 import psutil
-
-
-class OperationType(Enum):
-    READ = "read"
-    WRITE = "write"
-    DELETE = "delete"
-    MODIFY = "modify"
-
-
-@dataclass
-class Operation:
-    type: OperationType
-    description: str
-    requires_confirmation: bool
-
-
-class Logger:
-    """Simple logging utility for the NL Command Tool."""
-
-    def __init__(self, shell_pid: int):
-        self.log_file = f"/tmp/nlcommand_{shell_pid}.log"
-        self._configure_logging()
-
-    def _configure_logging(self):
-        logging.basicConfig(
-            filename=self.log_file,
-            level=logging.INFO,
-            format='%(asctime)s - %(levelname)s - %(message)s',
-            datefmt='%Y-%m-%d %H:%M:%S'
-        )
-
-        # Also log to console for ERROR and above
-        console = logging.StreamHandler()
-        console.setLevel(logging.ERROR)
-        formatter = logging.Formatter('%(levelname)s: %(message)s')
-        console.setFormatter(formatter)
-        logging.getLogger('').addHandler(console)
-
-    def info(self, message: str):
-        logging.info(message)
-
-    def error(self, message: str):
-        logging.error(message)
-
-    def warning(self, message: str):
-        logging.warning(message)
-
-
-class SecurityManager:
-    def __init__(self, logger: Logger):
-        self.logger = logger
-        self.config_path = os.path.expanduser("~/.nlcommand/security.json")
-        self.dangerous_operations = self._load_security_config()
-
-    def _load_security_config(self) -> Dict[str, Operation]:
-        self.logger.info(f"Loading security config from {self.config_path}")
-        if not os.path.exists(self.config_path):
-            return self._create_default_config()
-        with open(self.config_path, 'r') as f:
-            config_dict = json.load(f)
-        return {k: self._dict_to_operation(v) for k, v in config_dict.items()}
-
-    def _operation_to_dict(self, operation: Operation) -> dict:
-        """Convert Operation object to dictionary for JSON serialization."""
-        return {
-            "type": operation.type.value,  # Convert enum to string
-            "description": operation.description,
-            "requires_confirmation": operation.requires_confirmation
-        }
-
-    def _dict_to_operation(self, data: dict) -> Operation:
-        """Convert dictionary back to Operation object."""
-        return Operation(
-            type=OperationType(data["type"]),  # Convert string back to enum
-            description=data["description"],
-            requires_confirmation=data["requires_confirmation"]
-        )
-
-    def _create_default_config(self) -> Dict[str, Operation]:
-        default_config = {
-            "delete": Operation(
-                type=OperationType.DELETE,
-                description="Delete files or directories",
-                requires_confirmation=True
-            ),
-            "modify": Operation(
-                type=OperationType.MODIFY,
-                description="Modify existing files",
-                requires_confirmation=True
-            )
-        }
-
-        # Convert to dictionary for JSON serialization
-        config_dict = {
-            key: self._operation_to_dict(op)
-            for key, op in default_config.items()
-        }
-
-        os.makedirs(os.path.dirname(self.config_path), exist_ok=True)
-        with open(self.config_path, 'w') as f:
-            json.dump(config_dict, f, indent=2)
-
-        return default_config
 
 
 class ContextManager:
@@ -316,7 +216,7 @@ class LLMClient:
                  api_url: str = "http://localhost:1234/v1"):
         self.api_url = api_url
         self.logger = logger
-        self.functions = self._define_functions()
+        self.functions = Functions.get()
         # Session should be initialized and closed properly
         self.session = None
 
@@ -328,161 +228,6 @@ class LLMClient:
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         if self.session:
             await self.session.close()
-
-    def _define_functions(self) -> List[Dict[str, Any]]:
-        return [
-            {
-                "type": "function",
-                "function": {
-                    "name": "create_file",
-                    "description": "Create a new empty file",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "path": {"type": "string", "description": "Path to the file"},
-                        },
-                        "required": ["path"]
-                    }
-                }
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "read_file",
-                    "description": "Read contents of a file from anywhere on the system",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "path": {"type": "string", "description": "Path to the file"},
-                        },
-                        "required": ["path"]
-                    }
-                }
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "delete_file",
-                    "description": "Delete a file",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "path": {"type": "string", "description": "Path to the file"},
-                        },
-                        "required": ["path"]
-                    }
-                }
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "delete_directory",
-                    "description": "Delete a directory and its contents",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "path": {"type": "string", "description": "Path to the directory"},
-                        },
-                        "required": ["path"]
-                    }
-                }
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "copy_file",
-                    "description": "Copy a file from source to destination",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "source": {"type": "string", "description": "Source file path"},
-                            "destination": {"type": "string", "description": "Destination path"}
-                        },
-                        "required": ["source", "destination"]
-                    }
-                }
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "move_file",
-                    "description": "Move a file from source to destination",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "source": {"type": "string", "description": "Source file path"},
-                            "destination": {"type": "string", "description": "Destination path"}
-                        },
-                        "required": ["source", "destination"]
-                    }
-                }
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "check_path_exists",
-                    "description": "Check the existence of a file/folder",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "path": {"type": "string", "description": "Path to the file/folder to check for existence"}
-                        },
-                        "required": ["path"]
-                    }
-                }
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "last_n_lines",
-                    "description": "Read specified number of lines from a file",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "path": {"type": "string", "description": "Path to the file from which to read"},
-                            "count": {"type": "number", "description": "Number of lines from the end of the file"}
-                        },
-                        "required": ["path"]
-                    }
-                }
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "compile_code",
-                    "description": "Compile source code using gcc/g++",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "source": {"type": "string", "description": "Source file path"},
-                            "output": {"type": "string", "description": "Output file path"},
-                            "compiler": {"type": "string", "enum": ["gcc", "g++"], "description": "Compiler to use"},
-                            "flags": {"type": "array", "items": {"type": "string"}, "description": "Compiler flags"}
-                        },
-                        "required": ["source", "output", "compiler"]
-                    }
-                }
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "fetch_url",
-                    "description": "Fetch content from a URL using curl",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "url": {"type": "string", "description": "URL to fetch"},
-                            "output": {"type": "string", "description": "Output file path (optional)"},
-                            "headers": {
-                                "type": "object",
-                                "description": "HTTP headers to include"
-                            }
-                        },
-                        "required": ["url"]
-                    }
-                }
-            }
-        ]
 
     async def process_command(self, context: List[Dict[str, str]]) -> Dict[str, Any]:
         """Process a command through the LLM."""
@@ -566,109 +311,6 @@ class LLMClient:
             raise Exception(error_msg)
 
 
-class CommandExecutor:
-    """Executes system commands safely."""
-
-    def __init__(self, logger: Logger):
-        self.logger = logger
-
-    async def execute(self, command: List[str], timeout: int = 30) -> Dict[str, Any]:
-        cmd_str = ' '.join(command)
-        self.logger.info(f"Executing command: {cmd_str}")
-
-        try:
-            process = await asyncio.create_subprocess_exec(
-                *command,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-
-            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout)
-            result = {
-                "success": process.returncode == 0,
-                "stdout": stdout.decode(),
-                "stderr": stderr.decode(),
-                "return_code": process.returncode
-            }
-
-            if not result["success"]:
-                self.logger.error(
-                    f"Command failed: {cmd_str}\nError: {result['stderr']}"
-                )
-            else:
-                self.logger.info(f"Command completed successfully: {cmd_str}")
-
-            return result
-
-        except asyncio.TimeoutError:
-            self.logger.error(f"Command timed out: {cmd_str}")
-            process.kill()
-            return {
-                "success": False,
-                "error": f"Command timed out after {timeout} seconds"
-            }
-        except Exception as e:
-            self.logger.error(f"Error executing command {cmd_str}: {str(e)}")
-            return {
-                "success": False,
-                "error": str(e)
-            }
-
-
-class SystemCommands:
-    """Implements system commands using the CommandExecutor."""
-
-    def __init__(self, logger: Logger):
-        self.executor = CommandExecutor(logger)
-        self.logger = logger
-
-    async def create_file(self, path: str) -> Dict[str, Any]:
-        return await self.executor.execute(["touch", path])
-
-    async def read_file(self, path: str) -> Dict[str, Any]:
-        return await self.executor.execute(["cat", path])
-
-    async def delete_file(self, path: str) -> Dict[str, Any]:
-        return await self.executor.execute(["rm", path])
-
-    async def delete_directory(self, path: str) -> Dict[str, Any]:
-        return await self.executor.execute(["rm", "-r", path])
-
-    async def copy_file(self, source: str, destination: str) -> Dict[str, Any]:
-        return await self.executor.execute(["cp", source, destination])
-
-    async def move_file(self, source: str, destination: str) -> Dict[str, Any]:
-        return await self.executor.execute(["mv", source, destination])
-
-    async def check_path_exists(self, path: str) -> Dict[str, Any]:
-        return await self.executor.execute(["ls", "-l", path])
-
-    async def last_n_lines(self, path: str, count: int) -> Dict[str, Any]:
-        return await self.executor.execute(["tail", "-n", f"{count}", path])
-
-    async def compile_code(
-        self, source: str, output: str, compiler: str,
-        flags: List[str] = None
-    ) -> Dict[str, Any]:
-        command = [compiler, source, "-o", output]
-        if flags:
-            command.extend(flags)
-        return await self.executor.execute(command)
-
-    async def fetch_url(
-        self, url: str, output: str = None,
-        headers: Dict[str, str] = None
-    ) -> Dict[str, Any]:
-        command = ["curl"]
-        if headers:
-            for key, value in headers.items():
-                command.extend(["-H", f"{key}: {value}"])
-        if output:
-            command.extend(["-o", output])
-        command.append(url)
-        return await self.executor.execute(command)
-
-
 class NLCommandTool:
     def __init__(self, max_context_length: int = 4000):
         self.shell_pid = os.getppid()
@@ -731,7 +373,8 @@ class NLCommandTool:
                     llm_response["action"]
                 )
                 if operation and operation.requires_confirmation:
-                    if not await self._get_user_confirmation(operation):
+                    if not await self._get_user_confirmation(
+                            operation, json.dumps(llm_response["parameters"])):
                         return "Operation cancelled by user"
 
                 # Execute command
@@ -791,6 +434,7 @@ class NLCommandTool:
         params = parsed_command["parameters"]
 
         # Map actions to system commands
+        # @todo Make this so this need not be updated when adding functions.
         command_map = {
             "create_file": self.system_commands.create_file,
             "read_file": self.system_commands.read_file,
@@ -802,6 +446,8 @@ class NLCommandTool:
             "last_n_lines": self.system_commands.last_n_lines,
             "compile_code": self.system_commands.compile_code,
             "fetch_url": self.system_commands.fetch_url,
+            "execute_command": self.system_commands.execute_command,
+            "execute_code": self.system_commands.execute_code
         }
 
         if action not in command_map:
@@ -809,8 +455,11 @@ class NLCommandTool:
 
         return await command_map[action](**params)
 
-    async def _get_user_confirmation(self, operation: Operation) -> bool:
-        print(f"\nWarning: About to perform {operation.description}")
+    async def _get_user_confirmation(self, operation: Operation,
+                                     parameters: str) -> bool:
+        print(
+            "\nWarning: About to perform: "
+            f"{operation.description}\n```\n{parameters}\n```")
         loop = asyncio.get_event_loop()
         response = await loop.run_in_executor(
             None, input, "Are you sure? (y/N): ")

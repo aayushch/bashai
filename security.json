@@ -28,5 +28,10 @@
     "type": "write",
     "description": "Download content from the internet",
     "requires_confirmation": true
+  },
+  "execute_command": {
+    "type": "write",
+    "description": "Execute a command on the system",
+    "requires_confirmation": true
   }
 }

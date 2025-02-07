@@ -72,7 +72,9 @@ class ContextManager:
         self._cleanup_old_contexts()
 
     def _cleanup_old_contexts(self, max_age_hours: int = 24):
-        """Cleanup context DBs that haven't been accessed in the specified time."""
+        """
+        Cleanup context DBs that haven't been accessed in the specified time.
+        """
         try:
             db_dir = os.path.dirname(self.db_path)
             current_time = datetime.now()
@@ -97,7 +99,8 @@ class ContextManager:
                                         if not psutil.pid_exists(row[0]):
                                             os.remove(db_path)
                                             logging.info(
-                                                f"Removed old context DB: {filename}")
+                                                "Removed old context DB: "
+                                                f"{filename}")
                                     except Exception as e:
                                         logging.error(
                                             f"Error checking process: {e}")
@@ -112,12 +115,15 @@ class ContextManager:
         """Update the last_accessed timestamp for this context."""
         with sqlite3.connect(self.db_path) as conn:
             conn.execute(
-                "UPDATE context_metadata SET last_accessed = ? WHERE shell_pid = ?",
+                "UPDATE context_metadata SET last_accessed = ? "
+                "WHERE shell_pid = ?",
                 (datetime.now().isoformat(), self.shell_pid)
             )
 
     def update_token_count(self, tokens_used: int):
-        """Update the total token count and check if we're approaching the limit."""
+        """
+        Update the total token count and check if we're approaching the limit.
+        """
         with sqlite3.connect(self.db_path) as conn:
             conn.execute(
                 "UPDATE context_metadata "
@@ -126,19 +132,22 @@ class ContextManager:
                 (tokens_used, self.shell_pid)
             )
             cursor = conn.execute(
-                "SELECT total_tokens FROM context_metadata WHERE shell_pid = ?",
+                "SELECT total_tokens FROM context_metadata "
+                "WHERE shell_pid = ?",
                 (self.shell_pid,)
             )
             total_tokens = cursor.fetchone()[0]
 
-            if total_tokens >= self.max_context_length * 0.8:  # 80% warning threshold
+            # 80% warning threshold
+            if total_tokens >= self.max_context_length * 0.8:
                 return "warning"
             elif total_tokens >= self.max_context_length:
                 # Remove oldest entries until we're under 80% capacity
                 target_tokens = int(self.max_context_length * 0.8)
                 while total_tokens > target_tokens:
                     cursor = conn.execute(
-                        "SELECT id, token_count FROM command_history ORDER BY id ASC LIMIT 1"
+                        "SELECT id, token_count FROM command_history "
+                        "ORDER BY id ASC LIMIT 1"
                     )
                     row = cursor.fetchone()
                     if not row:
@@ -147,7 +156,8 @@ class ContextManager:
                         "DELETE FROM command_history WHERE id = ?", (row[0],))
                     total_tokens -= row[1]
                 conn.execute(
-                    "UPDATE context_metadata SET total_tokens = ? WHERE shell_pid = ?",
+                    "UPDATE context_metadata SET total_tokens = ? "
+                    "WHERE shell_pid = ?",
                     (total_tokens, self.shell_pid)
                 )
                 return "truncated"
@@ -207,7 +217,8 @@ class NotificationManager:
             notification = await self.notification_queue.get()
             # For MVP: Simple print to terminal
             print(
-                f"\n[{notification['level'].upper()}] {notification['message']}")
+                f"\n[{notification['level'].upper()}] "
+                f"{notification['message']}")
             self.notification_queue.task_done()
 
 
@@ -229,7 +240,8 @@ class LLMClient:
         if self.session:
             await self.session.close()
 
-    async def process_command(self, context: List[Dict[str, str]]) -> Dict[str, Any]:
+    async def process_command(self,
+                              context: List[Dict[str, str]]) -> Dict[str, Any]:
         """Process a command through the LLM."""
         try:
             # Construct the API request
@@ -339,7 +351,8 @@ class NLCommandTool:
                 context = [{
                     "role": "system",
                     "content": (
-                        "You are a linux technical helper. You have access to a set of tools "
+                        "You are a linux technical helper. "
+                        "You have access to a set of tools "
                         "to help the user with their requests."
                     )
                 }]
@@ -408,7 +421,8 @@ class NLCommandTool:
 
                 # Store only the final result in context manager
                 final_response = await self.process_command(
-                    "Please interpret these results and continue helping the user.",
+                    "Please interpret these results and "
+                    "continue helping the user.",
                     is_recursive=True,
                     context=context  # Pass the current context
                 )
@@ -478,7 +492,8 @@ async def main():
         if len(sys.argv) > 1:
             if sys.argv[1] == "--":
                 if sys.argv[2] == "--clean":
-                    pass  # @todo cleanup existing db
+                    tool.context_manager.remove_current_db()
+                    return
             else:
                 command = ' '.join(sys.argv[1:])
                 result = await tool.process_command(command)

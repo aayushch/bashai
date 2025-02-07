@@ -266,7 +266,8 @@ class CommandExecutor:
     def __init__(self, logger: Logger):
         self.logger = logger
 
-    async def execute(self, command: List[str], timeout: int = 30) -> Dict[str, Any]:
+    async def execute(self,
+                      command: List[str], timeout: int = 30) -> Dict[str, Any]:
         cmd_str = ' '.join(command)
         self.logger.info(f"Executing command: {cmd_str}")
 
@@ -341,8 +342,9 @@ class SystemCommands:
     async def last_n_lines(self, path: str, count: int) -> Dict[str, Any]:
         return await self.executor.execute(["tail", "-n", f"{count}", path])
 
-    async def execute_command(self, command: List[str]) -> Dict[str, Any]:
-        return await self.executor.execute(command)
+    async def execute_command(self, command: str,
+                              args: List[str] = []) -> Dict[str, Any]:
+        return await self.executor.execute([command, *args])
 
     async def execute_code(self, code: str) -> Dict[str, Any]:
         return {}  # @todo ai_code_sandbox

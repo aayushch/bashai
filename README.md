@@ -15,7 +15,8 @@ A command-line tool that interprets natural language commands and executes them 
 ## Requirements
 
 - Python 3.7+
-- Local LLM server running on http://localhost:1234/v1
+- Local LLM server running on http://localhost:1234/v1 (tested with LM Studio)
+- An LLM model which supports tool usage
 - Required Python packages:
   - aiohttp
   - sqlite3

@@ -11,6 +11,7 @@ from typing import Dict
 from Logger import Logger
 import json
 import os
+import shutil
 
 
 class OperationType(Enum):
@@ -57,29 +58,23 @@ class SecurityManager:
             requires_confirmation=data["requires_confirmation"]
         )
 
-    # @todo This needs to be fixed!
     def _create_default_config(self) -> Dict[str, Operation]:
-        default_config = {
-            "delete": Operation(
-                type=OperationType.DELETE,
-                description="Delete files or directories",
-                requires_confirmation=True
-            ),
-            "modify": Operation(
-                type=OperationType.MODIFY,
-                description="Modify existing files",
-                requires_confirmation=True
-            )
-        }
+        """
+        Copy default security config from package and return parsed operations.
+        """
+        # Get the package directory path
+        package_dir = os.path.dirname(os.path.abspath(__file__))
+        default_config_path = os.path.join(
+            package_dir, "security.json")
 
-        # Convert to dictionary for JSON serialization
-        config_dict = {
-            key: self._operation_to_dict(op)
-            for key, op in default_config.items()
-        }
-
+        # Create config directory if it doesn't exist
         os.makedirs(os.path.dirname(self.config_path), exist_ok=True)
-        with open(self.config_path, 'w') as f:
-            json.dump(config_dict, f, indent=2)
 
-        return default_config
+        # Copy default config to user's config location
+        shutil.copy2(default_config_path, self.config_path)
+
+        # Load and parse the copied config
+        with open(self.config_path, 'r') as f:
+            config_dict = json.load(f)
+
+        return {k: self._dict_to_operation(v) for k, v in config_dict.items()}

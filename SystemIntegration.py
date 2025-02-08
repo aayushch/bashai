@@ -8,6 +8,7 @@
 from typing import List, Dict, Any
 from Logger import Logger
 import asyncio
+from ai_code_sandbox import AICodeSandbox
 
 
 class Functions:
@@ -244,13 +245,13 @@ class Functions:
                 "type": "function",
                 "function": {
                     "name": "execute_code",
-                    "description": "Execute python code",
+                    "description": "Execute python code and return whatever is printed on stdout",
                     "parameters": {
                         "type": "object",
                         "properties": {
                             "code": {
                                 "type": "string",
-                                "description": "The python code to execute"
+                                "description": "The python code to execute and print results"
                             }
                         },
                         "required": ["code"]
@@ -317,6 +318,14 @@ class SystemCommands:
     def __init__(self, logger: Logger):
         self.executor = CommandExecutor(logger)
         self.logger = logger
+        self.sandbox = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self,  exc_type, exc_val, exc_tb):
+        if self.sandbox:
+            self.sandbox.close()
 
     async def create_file(self, path: str) -> Dict[str, Any]:
         return await self.executor.execute(["touch", path])
@@ -347,7 +356,17 @@ class SystemCommands:
         return await self.executor.execute([command, *args])
 
     async def execute_code(self, code: str) -> Dict[str, Any]:
-        return {}  # @todo ai_code_sandbox
+        # Initialize sandbox if this is the first call
+        if not self.sandbox:
+            self.sandbox = AICodeSandbox(
+                packages=["numpy", "pandas", "scikit-learn", "tensorflow"])
+
+        return {
+            "success": True,
+            "stdout": self.sandbox.run_code(code),
+            "stderr": '',
+            "return_code": 0
+        }
 
     async def compile_code(
         self, source: str, output: str, compiler: str,

@@ -228,6 +228,7 @@ class LLMClient:
         self.api_url = api_url
         self.logger = logger
         self.functions = Functions.get()
+
         # Session should be initialized and closed properly
         self.session = None
 
@@ -332,14 +333,17 @@ class NLCommandTool:
         self.security_manager = SecurityManager(self.logger)
         self.notification_manager = NotificationManager(self.logger)
         self.llm_client = None  # Will be initialized in setup()
-        self.system_commands = SystemCommands(self.logger)
+        self.system_commands = None  # Will be initialized in setup()
 
     async def setup(self):
         self.llm_client = await LLMClient(self.logger).__aenter__()
+        self.system_commands = SystemCommands(self.logger).__enter__()
 
     async def cleanup(self):
         if self.llm_client:
             await self.llm_client.__aexit__(None, None, None)
+        if self.system_commands:
+            self.system_commands.__exit__(None, None, None)
 
     async def process_command(
         self, command: str, is_recursive: bool = False,

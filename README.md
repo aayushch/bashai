@@ -36,7 +36,7 @@ ln -s ai-code-sandbox/ai_code_sandbox
 ```bash
 pip install -r requirements.txt
 ```
-4. Contexts and security configuration are maintained in `~/.nlcommand` folder
+4. Contexts and security configuration are maintained in `~/.bashai` folder
 5. Logs are generated in `/tmp`
 6. Contexts are maintained per `shell` and are auto cleaned up if the shell
 is unused for a prolonged period of time. Context can also be manually cleared.

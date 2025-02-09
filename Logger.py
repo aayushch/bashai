@@ -13,7 +13,7 @@ class Logger:
 
     def __init__(self, shell_pid: int):
         # @todo configurable or parameter
-        self.log_file = f"/tmp/nlcommand_{shell_pid}.log"
+        self.log_file = f"/tmp/bashai_{shell_pid}.log"
         self._configure_logging()
 
     def _configure_logging(self):

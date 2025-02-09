@@ -22,6 +22,7 @@ import aiohttp
 import logging
 import sys
 import psutil
+import traceback
 
 
 class ContextManager:
@@ -30,7 +31,7 @@ class ContextManager:
         self.shell_pid = shell_pid
         self.logger = logger
         self.db_path = os.path.expanduser(
-            f"~/.nlcommand/context_{shell_pid}.db")
+            f"~/.bashai/context_{shell_pid}.db")
         self.max_context_length = max_context_length
         self.current_context_length = 0
         self._init_db()
@@ -230,9 +231,9 @@ class NotificationManager:
 
 
 class LLMClient:
-    def __init__(self, logger: Logger,
-                 api_url: str = "http://localhost:1234/v1"):
-        self.api_url = api_url
+    def __init__(self, logger: Logger, config: Dict[str, Any]):
+        self.config = config
+        self.api_url = self.config["llm"]["api_url"]
         self.logger = logger
         self.functions = Functions.get()
 
@@ -254,11 +255,11 @@ class LLMClient:
         try:
             # Construct the API request
             request = {
-                "model": "local-model",
+                "model": self.config["llm"]["model"],
                 "messages": context,
                 "function_call": "auto",
-                "temperature": 0.7,
-                "max_tokens": 4096
+                "temperature": self.config["llm"]["temperature"],
+                "max_tokens": self.config["llm"]["max_tokens"]
             }
 
             # If the most recent chat in the conversation is the tool's
@@ -266,15 +267,18 @@ class LLMClient:
             if len(context) and context[-1]["role"] != "tool":
                 request["tools"] = self.functions
 
+            # self.logger.info(
+            #     f"Sending request to LLM API: {json.dumps(request, indent=2)}"
+            # )
             self.logger.info(
-                f"Sending request to LLM API: {json.dumps(request, indent=2)}"
-            )
+                f"Sending request to LLM API: {len(request["messages"])} prompts")
 
             # Make the API call
             async with self.session.post(
                 f"{self.api_url}/chat/completions",
                 json=request,
-                headers={"Content-Type": "application/json"}
+                headers={"Content-Type": "application/json"},
+                timeout=None
             ) as response:
                 if response.status != 200:
                     error_text = await response.text()
@@ -305,9 +309,13 @@ class LLMClient:
                         f"{response_data['action']} with parameters: "
                         f"{response_data['parameters']}")
                 elif "content" in message:
+                    content = message["content"]
+                    usage = result.get("usage", {})
+                    self.logger.info(
+                        f"Processed content: {len(content)} bytes [{usage}]")
                     response_data = {
-                        "content": message["content"],
-                        "usage": result.get("usage", {})
+                        "content": content,
+                        "usage": usage
                     }
                 return response_data
 
@@ -327,23 +335,26 @@ class LLMClient:
             raise Exception(error_msg)
         except Exception as e:
             error_msg = f"Error processing command through LLM: {str(e)}"
+            #print(traceback.format_exc())
             self.logger.error(error_msg)
             raise Exception(error_msg)
 
 
-class NLCommandTool:
-    def __init__(self, max_context_length: int = 4000):
+class BashAI:
+    def __init__(self, config: Dict[str, Any]):
+        self.config = config
         self.shell_pid = os.getppid()
         self.logger = Logger(self.shell_pid)
         self.context_manager = ContextManager(
-            self.shell_pid, self.logger, max_context_length)
+            self.shell_pid, self.logger, self.config["context"]["max_length"])
         self.security_manager = SecurityManager(self.logger)
         self.notification_manager = NotificationManager(self.logger)
         self.llm_client = None  # Will be initialized in setup()
         self.system_commands = None  # Will be initialized in setup()
 
     async def setup(self):
-        self.llm_client = await LLMClient(self.logger).__aenter__()
+        self.llm_client = await LLMClient(self.logger,
+                                          self.config).__aenter__()
         self.system_commands = SystemCommands(self.logger).__enter__()
 
     async def cleanup(self):
@@ -415,9 +426,14 @@ class NLCommandTool:
 
                 # Extract the tool output
                 status = result["success"]
-                tool_output = result["stdout"]
 
                 if not status:
+                    if "error" in result:
+                        tool_output = result["error"]
+
+                if "stdout" in result:
+                    tool_output = result["stdout"]
+                if "stderr" in result:
                     tool_output = tool_output + result["stderr"]
 
                 if len(tool_output) == 0:
@@ -491,8 +507,32 @@ class NLCommandTool:
         return response.lower() == 'y'
 
 
+class Config:
+    @staticmethod
+    def get():
+        config_path = os.path.expanduser('~/.bashai/config.json')
+        try:
+            with open(config_path, 'r') as config:
+                return json.load(config)
+        except Exception as e:
+            print(f"{config_path}: {e}. Using default configs")
+            return {
+                "llm": {
+                    "api_url": "http://localhost:1234/v1",
+                    "model": "local-model",
+                    "temperature": 0.7,
+                    "max_tokens": 4096
+                },
+                "context": {
+                    "max_length": 4000,
+                    "max_age_hours": 24
+                }
+            }
+
+
 async def main():
-    tool = NLCommandTool()
+    config = Config.get()
+    tool = BashAI(config)
     await tool.setup()  # Initialize the LLM client
     notification_task = asyncio.create_task(
         tool.notification_manager.process_notifications()
@@ -513,7 +553,7 @@ async def main():
 
         # Interactive shell mode
         while True:
-            command = input("nl> ")
+            command = input("agent> ")
             if command.lower() in ['exit', 'quit']:
                 break
             result = await tool.process_command(command)

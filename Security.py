@@ -31,7 +31,7 @@ class Operation:
 class SecurityManager:
     def __init__(self, logger: Logger):
         self.logger = logger
-        self.config_path = os.path.expanduser("~/.nlcommand/security.json")
+        self.config_path = os.path.expanduser("~/.bashai/security.json")
         self.dangerous_operations = self._load_security_config()
 
     def _load_security_config(self) -> Dict[str, Operation]:

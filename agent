@@ -10,7 +10,7 @@
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 
-from Logger import Logger
+from Logger import Logger, Colors
 from Security import SecurityManager, Operation
 from SystemIntegration import Functions, SystemCommands
 
@@ -22,7 +22,6 @@ import aiohttp
 import logging
 import sys
 import psutil
-import traceback
 
 
 class ContextManager:
@@ -267,11 +266,27 @@ class LLMClient:
             if len(context) and context[-1]["role"] != "tool":
                 request["tools"] = self.functions
 
-            # self.logger.info(
-            #     f"Sending request to LLM API: {json.dumps(request, indent=2)}"
-            # )
             self.logger.info(
-                f"Sending request to LLM API: {len(request["messages"])} prompts")
+                f"Sending request to LLM: {len(request["messages"])} prompts")
+
+            conversation = ''
+            for message in request["messages"]:
+                # Get the role and content
+                conversation = conversation + f"> {message["role"]}: "
+                content = ""
+                if "content" in message:
+                    content = message["content"]
+
+                    # Truncate is content is too large
+                    if len(content) > 2048:
+                        content = (
+                            content[:77] + "...<truncated>..." + content[-26:])
+                if "function_call" in message:
+                    func = message["function_call"]
+                    content = f"{func["name"]}  {func["arguments"]["command"]}"
+
+                conversation = conversation + content + "\n"
+            self.logger.debug(f"Conversation:\n{conversation}")
 
             # Make the API call
             async with self.session.post(
@@ -344,7 +359,7 @@ class BashAI:
     def __init__(self, config: Dict[str, Any]):
         self.config = config
         self.shell_pid = os.getppid()
-        self.logger = Logger(self.shell_pid)
+        self.logger = Logger(self.config, self.shell_pid)
         self.context_manager = ContextManager(
             self.shell_pid, self.logger, self.config["context"]["max_length"])
         self.security_manager = SecurityManager(self.logger)
@@ -498,58 +513,103 @@ class BashAI:
 
     async def _get_user_confirmation(self, operation: Operation,
                                      parameters: str) -> bool:
-        print(
+        print(f"{Colors.FG.yellow}"
             "\nWarning: About to perform: "
             f"{operation.description}\n```\n{parameters}\n```")
         loop = asyncio.get_event_loop()
         response = await loop.run_in_executor(
             None, input, "Are you sure? (y/N): ")
+        print(Colors.reset)
         return response.lower() == 'y'
 
 
 class Config:
+    """Configuration handler class"""
+    # Default value
+    DEFAULT_LLM_URL = "http://localhost:1234"
+    DEFAULT_LLM_MODEL = "local-model"
+    DEFAULT_LLM_TEMP = 0.7
+    DEFAULT_LLM_MAX_TOKENS = 4096
+    DEFAULT_CONTEXT_MAX_LENGTH = 4000
+    DEFAULT_CONTEXT_MAX_AGE = 24
+    DEFAULT_LOGGER_LEVEL = logging.INFO
+
+    DEFAULT_CONFIG = {
+        "llm": {
+            "api_url": DEFAULT_LLM_URL,
+            "model": DEFAULT_LLM_MODEL,
+            "temperature": DEFAULT_LLM_TEMP,
+            "max_tokens": DEFAULT_LLM_MAX_TOKENS
+        },
+        "context": {
+            "max_length": DEFAULT_CONTEXT_MAX_LENGTH,
+            "max_age_hours": DEFAULT_CONTEXT_MAX_AGE
+        },
+        "logger": {
+            "level": DEFAULT_LOGGER_LEVEL
+        }
+    }
+
     @staticmethod
     def get():
+        """ Get the configs """
+        def sync(default, custom):
+            """ Helper utility to sync configurations """
+            for key in default:
+                if key not in custom or type(default[key]) != type(custom[key]):
+                    custom[key] = default[key]
+                elif isinstance(default[key], dict):
+                    sync(default[key], custom[key])
+
         config_path = os.path.expanduser('~/.bashai/config.json')
         try:
-            with open(config_path, 'r') as config:
-                return json.load(config)
+            with open(config_path, 'r') as config_file:
+                configs = json.load(config_file)
+                sync(Config.DEFAULT_CONFIG, configs)
+                return configs
+
         except Exception as e:
             print(f"{config_path}: {e}. Using default configs")
-            return {
-                "llm": {
-                    "api_url": "http://localhost:1234/v1",
-                    "model": "local-model",
-                    "temperature": 0.7,
-                    "max_tokens": 4096
-                },
-                "context": {
-                    "max_length": 4000,
-                    "max_age_hours": 24
-                }
-            }
+            return Config.DEFAULT_CONFIG
 
 
 async def main():
+    # Get configs
     config = Config.get()
+
+    # Create the tool
     tool = BashAI(config)
-    await tool.setup()  # Initialize the LLM client
+
+    # Initialize the LLM client
+    await tool.setup()
+
+    # Setup notifications (@todo)
     notification_task = asyncio.create_task(
         tool.notification_manager.process_notifications()
     )
 
     try:
         # Command-line mode if arguments are provided
-        if len(sys.argv) > 1:
-            if sys.argv[1] == "--":
-                if sys.argv[2] == "--clean":
-                    tool.context_manager.remove_current_db()
-                    return
-            else:
-                command = ' '.join(sys.argv[1:])
-                result = await tool.process_command(command)
+        if len(sys.argv) > 1 and sys.argv[1] == "--":
+            if sys.argv[2] == "--clean":
+                # Clean the current context.
+                tool.context_manager.remove_current_db()
+            elif sys.argv[2] == "--command":
+                # Init system integration
+                system_commands = SystemCommands(tool.logger).__enter__()
+
+                # Execute the command and print result.
+                result = await system_commands.execute_command(sys.argv[3])
                 print(result)
-                return
+            return
+
+
+        # Command line mode
+        if len(sys.argv) > 1:
+            command = ' '.join(sys.argv[1:])
+            result = await tool.process_command(command)
+            print(f"{Colors.FG.lightcyan}{result}{Colors.reset}")
+            return
 
         # Interactive shell mode
         while True:
@@ -557,7 +617,7 @@ async def main():
             if command.lower() in ['exit', 'quit']:
                 break
             result = await tool.process_command(command)
-            print(result)
+            print(f"{Colors.FG.lightcyan}{result}{Colors.reset}")
     finally:
         notification_task.cancel()
         await tool.cleanup()  # Clean up the LLM client

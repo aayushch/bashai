@@ -9,6 +9,7 @@ from typing import List, Dict, Any
 from Logger import Logger
 import asyncio
 from ai_code_sandbox import AICodeSandbox
+import traceback
 
 
 class Functions:
@@ -273,10 +274,10 @@ class CommandExecutor:
         self.logger.info(f"Executing command: {cmd_str}")
 
         try:
-            process = await asyncio.create_subprocess_exec(
-                *command,
+            process = await asyncio.create_subprocess_shell(
+                cmd_str,
                 stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
+                stderr=asyncio.subprocess.PIPE,
             )
 
             stdout, stderr = await asyncio.wait_for(process.communicate(),
@@ -293,7 +294,11 @@ class CommandExecutor:
                     f"Command failed: {cmd_str}\nError: {result['stderr']}"
                 )
             else:
-                self.logger.info(f"Command completed successfully: {cmd_str}")
+                out = result["stdout"]
+                if len(out) > 1024:
+                    out = out[:77] + "...<truncated>..." + out[-26:]
+                self.logger.info("Command success:\n"
+                    f"  > {cmd_str}\n  > {out}")
 
             return result
 
@@ -305,7 +310,7 @@ class CommandExecutor:
                 "error": f"Command timed out after {timeout} seconds"
             }
         except Exception as e:
-            self.logger.error(f"Error executing command {cmd_str}: {str(e)}")
+            self.logger.error(f"Error executing command `{cmd_str}`: {str(e)}")
             return {
                 "success": False,
                 "error": str(e)
@@ -353,7 +358,22 @@ class SystemCommands:
 
     async def execute_command(self, command: str,
                               args: List[str] = []) -> Dict[str, Any]:
-        return await self.executor.execute([command, *args])
+        # Some models may send the command and the args as a stirng. Some may
+        # set an empty args list as a string '[]'. We will sanitise these
+        # cases here before executing.
+        # First split the command if it contains command line args.
+        components = command.split()
+
+        # Now check we received a valid args as a list
+        if isinstance(args, list):
+            # args is a valid type. Extend the command.
+            components.extend(args)
+
+        # Get the base command and use rest as args.
+        command = components.pop(0)
+
+        # Execute with sanitised inputs.
+        return await self.executor.execute([command, *components])
 
     async def execute_code(self, code: str) -> Dict[str, Any]:
         # Initialize sandbox if this is the first call

@@ -283,7 +283,7 @@ class LLMClient:
                             content[:77] + "...<truncated>..." + content[-26:])
                 if "function_call" in message:
                     func = message["function_call"]
-                    content = f"{func["name"]}  {func["arguments"]["command"]}"
+                    content = f"{func["name"]}  {func["arguments"]}"
 
                 conversation = conversation + content + "\n"
             self.logger.debug(f"Conversation:\n{conversation}")
@@ -310,19 +310,26 @@ class LLMClient:
                 # Extract content or function call from response
                 message = result["choices"][0]["message"]
                 if "tool_calls" in message:
-                    # @todo Iterate all tool calls for multiple functions.
                     tool_calls = message["tool_calls"]
+                    actions = []
+
+                    for tool in tool_calls:
+                        actions.append({
+                            "function": tool["function"]["name"],
+                            "parameters": json.loads(
+                                tool["function"]["arguments"])
+                        })
+
+                        self.logger.info(
+                            f"Processed command into action: "
+                            f"{tool["function"]["name"]} with parameters: "
+                            f"{tool["function"]["arguments"]}")
+
                     response_data = {
-                        "action": tool_calls[0]["function"]["name"],
-                        "parameters": json.loads(
-                            tool_calls[0]["function"]["arguments"]),
+                        "actions": actions,
                         "usage": result.get("usage", {})
                     }
 
-                    self.logger.info(
-                        f"Processed command into action: "
-                        f"{response_data['action']} with parameters: "
-                        f"{response_data['parameters']}")
                 elif "content" in message:
                     content = message["content"]
                     usage = result.get("usage", {})
@@ -388,8 +395,9 @@ class BashAI:
                 context = [{
                     "role": "system",
                     "content": (
-                        "You are a linux technical helper. "
-                        "You have access to a set of tools "
+                        "You are a linux system administrator. "
+                        "You have the ability to execute commands "
+                        "on the system and access to a set of tools "
                         "to help the user with their requests."
                     )
                 }]
@@ -417,49 +425,53 @@ class BashAI:
             # Process through LLM
             llm_response = await self.llm_client.process_command(context)
 
-            if "action" in llm_response:
-                # Security check
-                operation = self.security_manager.dangerous_operations.get(
-                    llm_response["action"]
-                )
-                if operation and operation.requires_confirmation:
-                    if not await self._get_user_confirmation(
-                            operation, json.dumps(llm_response["parameters"])):
-                        return "Operation cancelled by user"
+            if "actions" in llm_response:
+                for action in llm_response["actions"]:
+                    function = action["function"]
+                    parameters = action["parameters"]
 
-                # Execute command
-                result = await self._execute_command(llm_response)
+                    # Security check
+                    operation = self.security_manager.dangerous_operations.get(
+                        function)
 
-                # Add tool result to context
-                context.append({
-                    "role": "assistant",
-                    "function_call": {
-                        "name": llm_response["action"],
-                        "arguments": llm_response["parameters"]
-                    }
-                })
+                    if operation and operation.requires_confirmation:
+                        if not await self._get_user_confirmation(
+                                operation, json.dumps(parameters)):
+                            return "Operation cancelled by user"
 
-                # Extract the tool output
-                status = result["success"]
+                    # Execute command
+                    result = await self._execute_command(action)
 
-                if not status:
-                    if "error" in result:
-                        tool_output = result["error"]
+                    # Add tool call to context
+                    context.append({
+                        "role": "assistant",
+                        "function_call": {
+                            "name": function,
+                            "arguments": parameters
+                        }
+                    })
 
-                if "stdout" in result:
-                    tool_output = result["stdout"]
-                if "stderr" in result:
-                    tool_output = tool_output + result["stderr"]
+                    # Extract the tool output
+                    status = result["success"]
 
-                if len(tool_output) == 0:
-                    tool_output = (
-                        f"Operation {'success' if status else 'failed'}")
+                    if not status:
+                        if "error" in result:
+                            tool_output = result["error"]
 
-                # Append the tool output to the conversation.
-                context.append({
-                    "role": "tool",
-                    "content": tool_output
-                })
+                    if "stdout" in result:
+                        tool_output = result["stdout"]
+                    if "stderr" in result:
+                        tool_output = tool_output + result["stderr"]
+
+                    if len(tool_output) == 0:
+                        tool_output = (
+                            f"Operation {'success' if status else 'failed'}")
+
+                    # Append the tool output to the conversation.
+                    context.append({
+                        "role": "tool",
+                        "content": tool_output
+                    })
 
                 # Store only the final result in context manager
                 final_response = await self.process_command(
@@ -486,7 +498,7 @@ class BashAI:
             return f"Error: {str(e)}"
 
     async def _execute_command(self, parsed_command: Dict[str, Any]):
-        action = parsed_command["action"]
+        action = parsed_command["function"]
         params = parsed_command["parameters"]
 
         # Map actions to system commands

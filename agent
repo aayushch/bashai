@@ -269,24 +269,32 @@ class LLMClient:
             self.logger.info(
                 f"Sending request to LLM: {len(request["messages"])} prompts")
 
-            conversation = ''
-            for message in request["messages"]:
-                # Get the role and content
-                conversation = conversation + f"> {message["role"]}: "
-                content = ""
-                if "content" in message:
-                    content = message["content"]
+            # Log conversations only if debug logs are enabled
+            if self.config["logger"]["level"] <= logging.DEBUG:
+                conversation = ''
+                for message in request["messages"]:
+                    # Get the role and content
+                    conversation = conversation + f"> {message["role"]}: "
+                    content = ""
 
-                    # Truncate is content is too large
-                    if len(content) > 2048:
-                        content = (
-                            content[:77] + "...<truncated>..." + content[-26:])
-                if "function_call" in message:
-                    func = message["function_call"]
-                    content = f"{func["name"]}  {func["arguments"]}"
+                    # Get content from the message
+                    if "content" in message:
+                        content = message["content"]
 
-                conversation = conversation + content + "\n"
-            self.logger.debug(f"Conversation:\n{conversation}")
+                        # Truncate is content is too large
+                        if len(content) > 2048:
+                            content = (
+                                content[:77] + "...<trunc>..." + content[-26:])
+
+                    # Get function calls from the message
+                    if "function_call" in message:
+                        func = message["function_call"]
+                        content = f"{func["name"]}  {func["arguments"]}"
+
+                    conversation = conversation + content + "\n"
+
+                # Debug print the conversation
+                self.logger.debug(f"Conversation:\n{conversation}")
 
             # Make the API call
             async with self.session.post(
@@ -309,36 +317,47 @@ class LLMClient:
 
                 # Extract content or function call from response
                 message = result["choices"][0]["message"]
+
+                # Check of the model is requesting a tool call or if this is
+                # just a response
                 if "tool_calls" in message:
                     tool_calls = message["tool_calls"]
                     actions = []
 
                     for tool in tool_calls:
+                        # Iterate all tool calls and populate the actions
+                        # collection
                         actions.append({
                             "function": tool["function"]["name"],
                             "parameters": json.loads(
                                 tool["function"]["arguments"])
                         })
 
+                        # Log what we received.
                         self.logger.info(
                             f"Processed command into action: "
                             f"{tool["function"]["name"]} with parameters: "
                             f"{tool["function"]["arguments"]}")
 
+                    # Normalise for the caller and send back.
                     response_data = {
                         "actions": actions,
                         "usage": result.get("usage", {})
                     }
-
                 elif "content" in message:
+                    # We got a simple response.
                     content = message["content"]
                     usage = result.get("usage", {})
+
                     self.logger.info(
                         f"Processed content: {len(content)} bytes [{usage}]")
+
+                    # Normalise for the caller and send back.
                     response_data = {
                         "content": content,
                         "usage": usage
                     }
+
                 return response_data
 
         except aiohttp.ClientError as e:
@@ -506,6 +525,7 @@ class BashAI:
         command_map = {
             "create_file": self.system_commands.create_file,
             "read_file": self.system_commands.read_file,
+            "write_file": self.system_commands.write_file,
             "delete_file": self.system_commands.delete_file,
             "delete_directory": self.system_commands.delete_directory,
             "copy_file": self.system_commands.copy_file,

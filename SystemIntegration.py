@@ -53,6 +53,27 @@ class Functions:
             {
                 "type": "function",
                 "function": {
+                    "name": "write_file",
+                    "description": "Write the specified data into the file at the provided path",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "path": {
+                                "type": "string",
+                                "description": "Path to the file in which to write the data"
+                            },
+                            "data": {
+                                "type": "string",
+                                "description": "The data to write to the file"
+                            }
+                        },
+                        "required": ["path"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
                     "name": "delete_file",
                     "description": "Delete a file",
                     "parameters": {
@@ -338,6 +359,9 @@ class SystemCommands:
     async def read_file(self, path: str) -> Dict[str, Any]:
         return await self.executor.execute(["cat", path])
 
+    async def write_file(self, path: str, data: str) -> Dict[str, Any]:
+        return await self.executor.execute(["echo", f"'{data}'", ">|", path])
+
     async def delete_file(self, path: str) -> Dict[str, Any]:
         return await self.executor.execute(["rm", path])
 
@@ -358,7 +382,7 @@ class SystemCommands:
 
     async def execute_command(self, command: str,
                               args: List[str] = []) -> Dict[str, Any]:
-        # Some models may send the command and the args as a stirng. Some may
+        # Some models may send the command and the args as a string. Some may
         # set an empty args list as a string '[]'. We will sanitise these
         # cases here before executing.
         # First split the command if it contains command line args.

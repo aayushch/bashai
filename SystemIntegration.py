@@ -304,6 +304,7 @@ class CommandExecutor:
             stdout, stderr = await asyncio.wait_for(process.communicate(),
                                                     timeout)
             result = {
+                "status": "success" if process.returncode == 0 else "error",
                 "success": process.returncode == 0,
                 "stdout": stdout.decode(),
                 "stderr": stderr.decode(),
@@ -319,7 +320,7 @@ class CommandExecutor:
                 if len(out) > 1024:
                     out = out[:77] + "...<truncated>..." + out[-26:]
                 self.logger.info("Command success:\n"
-                    f"  > {cmd_str}\n  > {out}")
+                                 f"  > {cmd_str}\n  > {out}")
 
             return result
 
@@ -327,12 +328,14 @@ class CommandExecutor:
             self.logger.error(f"Command timed out: {cmd_str}")
             process.kill()
             return {
+                "status": "error",
                 "success": False,
                 "error": f"Command timed out after {timeout} seconds"
             }
         except Exception as e:
             self.logger.error(f"Error executing command `{cmd_str}`: {str(e)}")
             return {
+                "status": "error",
                 "success": False,
                 "error": str(e)
             }

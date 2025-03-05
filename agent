@@ -1,4 +1,4 @@
-#!/bin/python3
+#!/usr/bin/env python3
 
 # Copyright (c) 2025
 # Licensed under the MIT License.
@@ -267,14 +267,14 @@ class LLMClient:
                 request["tools"] = self.functions
 
             self.logger.info(
-                f"Sending request to LLM: {len(request["messages"])} prompts")
+                f'Sending request to LLM: {len(request["messages"])} prompts')
 
             # Log conversations only if debug logs are enabled
             if self.config["logger"]["level"] <= logging.DEBUG:
                 conversation = ''
                 for message in request["messages"]:
                     # Get the role and content
-                    conversation = conversation + f"> {message["role"]}: "
+                    conversation = conversation + f'> {message["role"]}: '
                     content = ""
 
                     # Get content from the message
@@ -289,7 +289,7 @@ class LLMClient:
                     # Get function calls from the message
                     if "function_call" in message:
                         func = message["function_call"]
-                        content = f"{func["name"]}  {func["arguments"]}"
+                        content = f'{func["name"]}  {func["arguments"]}'
 
                     conversation = conversation + content + "\n"
 
@@ -329,6 +329,7 @@ class LLMClient:
                         # collection
                         actions.append({
                             "id": tool["id"],
+                            "type": tool["type"],
                             "function": tool["function"]["name"],
                             "parameters": json.loads(
                                 tool["function"]["arguments"])
@@ -337,10 +338,10 @@ class LLMClient:
                         # Log what we received.
                         self.logger.info(
                             f"Processed command into action: "
-                            f"{tool["function"]["name"]} with parameters: "
-                            f"{tool["function"]["arguments"]}")
+                            f'{tool["function"]["name"]} with parameters: '
+                            f'{tool["function"]["arguments"]}')
 
-                    # Normalise for the caller and send back.
+                    # Normalize for the caller and send back.
                     response_data = {
                         "actions": actions,
                         "usage": result.get("usage", {})
@@ -353,7 +354,7 @@ class LLMClient:
                     self.logger.info(
                         f"Processed content: {len(content)} bytes [{usage}]")
 
-                    # Normalise for the caller and send back.
+                    # Normalize for the caller and send back.
                     response_data = {
                         "content": content,
                         "usage": usage
@@ -377,7 +378,7 @@ class LLMClient:
             raise Exception(error_msg)
         except Exception as e:
             error_msg = f"Error processing command through LLM: {str(e)}"
-            #print(traceback.format_exc())
+            # print(traceback.format_exc())
             self.logger.error(error_msg)
             raise Exception(error_msg)
 
@@ -446,6 +447,23 @@ class BashAI:
             llm_response = await self.llm_client.process_command(context)
 
             if "actions" in llm_response:
+                # Update the context
+                context.append({
+                    "role": "assistant",
+                    "tool_calls": [
+                        {
+                            "id": action["id"],
+                            "type": action["type"],
+                            "function":
+                            {
+                                "name": action["function"],
+                                "arguments": json.dumps(action["parameters"])
+                            }
+                        } for action in llm_response["actions"]
+                    ]
+                })
+
+                # Perform each action.
                 for action in llm_response["actions"]:
                     id = action["id"]
                     function = action["function"]
@@ -464,35 +482,42 @@ class BashAI:
                     result = await self._execute_command(action)
 
                     # Add tool call to context
-                    context.append({
-                        "role": "assistant",
-                        "function_call": {
-                            "name": function,
-                            "arguments": parameters
-                        }
-                    })
+                    # context.append({
+                    #     "role": "assistant",
+                    #     "function_call": {
+                    #         "name": function,
+                    #         "arguments": parameters
+                    #     }
+                    # })
 
-                    # Extract the tool output
-                    status = result["success"]
+                    # # Extract the tool output
+                    # status = result["success"]
 
-                    if not status:
-                        if "error" in result:
-                            tool_output = result["error"]
+                    # if not status:
+                    #     if "error" in result:
+                    #         tool_output = result["error"]
 
-                    if "stdout" in result:
-                        tool_output = result["stdout"]
-                    if "stderr" in result:
-                        tool_output = tool_output + result["stderr"]
+                    # if "stdout" in result:
+                    #     tool_output = result["stdout"]
+                    # if "stderr" in result:
+                    #     tool_output = tool_output + result["stderr"]
 
-                    if len(tool_output) == 0:
-                        tool_output = (
-                            f"Operation {'success' if status else 'failed'}")
+                    # if len(tool_output) == 0:
+                    #     tool_output = (
+                    #         f"Operation {'success' if status else 'failed'}")
+
+                    # # Append the tool output to the conversation.
+                    # context.append({
+                    #     "role": "tool",
+                    #     "tool_call_id": f"{id}",
+                    #     "content": f"{tool_output}"
+                    # })
 
                     # Append the tool output to the conversation.
                     context.append({
                         "role": "tool",
                         "tool_call_id": f"{id}",
-                        "content": tool_output
+                        "content": json.dumps(result)
                     })
 
                 # Store only the final result in context manager
@@ -549,8 +574,8 @@ class BashAI:
     async def _get_user_confirmation(self, operation: Operation,
                                      parameters: str) -> bool:
         print(f"{Colors.FG.yellow}"
-            "\nWarning: About to perform: "
-            f"{operation.description}\n```\n{parameters}\n```")
+              "\nWarning: About to perform: "
+              f"{operation.description}\n```\n{parameters}\n```")
         loop = asyncio.get_event_loop()
         response = await loop.run_in_executor(
             None, input, "Are you sure? (y/N): ")
@@ -561,7 +586,7 @@ class BashAI:
 class Config:
     """Configuration handler class"""
     # Default value
-    DEFAULT_LLM_URL = "http://localhost:1234"
+    DEFAULT_LLM_URL = "http://localhost:1234/v1"
     DEFAULT_LLM_MODEL = "local-model"
     DEFAULT_LLM_TEMP = 0.7
     DEFAULT_LLM_MAX_TOKENS = 4096
@@ -637,7 +662,6 @@ async def main():
                 result = await system_commands.execute_command(sys.argv[3])
                 print(result)
             return
-
 
         # Command line mode
         if len(sys.argv) > 1:

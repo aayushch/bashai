@@ -328,6 +328,7 @@ class LLMClient:
                         # Iterate all tool calls and populate the actions
                         # collection
                         actions.append({
+                            "id": tool["id"],
                             "function": tool["function"]["name"],
                             "parameters": json.loads(
                                 tool["function"]["arguments"])
@@ -446,6 +447,7 @@ class BashAI:
 
             if "actions" in llm_response:
                 for action in llm_response["actions"]:
+                    id = action["id"]
                     function = action["function"]
                     parameters = action["parameters"]
 
@@ -489,6 +491,7 @@ class BashAI:
                     # Append the tool output to the conversation.
                     context.append({
                         "role": "tool",
+                        "tool_call_id": f"{id}",
                         "content": tool_output
                     })
 

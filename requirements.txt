@@ -1,0 +1,6 @@
+docker
+setuptools
+twine
+pytest
+aiohttp
+psutil

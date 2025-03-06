@@ -71,11 +71,12 @@ python agent -- --clean
 ```bash
 # As a shell
 $ python agent
-nl> create a new file called test.txt
-nl> show me the last 5 lines of /var/log/syslog
+agent> create a new file called test.txt
+agent> show me the last 5 lines of /var/log/syslog
 
 # As a command
 $ python agent "create a backup of my-file.txt"
+$ tail -100 /var/log/syslog | agent analyse the logs
 ```
 
 ## Security

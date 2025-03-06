@@ -63,7 +63,7 @@ if you modify the `#!` in the agent and `chmod +x` it.
 ### Clean Context
 Clears the context associated with the current shell.
 ```bash
-python agent-- --clean
+python agent -- --clean
 ```
 
 ## Examples

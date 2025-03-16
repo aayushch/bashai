@@ -36,7 +36,7 @@ A command-line tool that interprets natural language commands and executes them 
 1. Clone the repository
 2. Create a soft link for ai_code_sandbox:
 ```bash
-cs bashai
+cd bashai
 ln -s ai-code-sandbox/ai_code_sandbox
 ```
 3. Install dependencies:
@@ -54,8 +54,7 @@ python3 -m playwright install webkit
 5. Contexts and security configuration are maintained in `~/.bashai` folder
 6. Logs are generated in `/tmp`
 7. Contexts are maintained per `shell` and are auto cleaned up if the shell
-is unused for a prolonged period of time. Context can also be manually cleared.
-See below.
+   is unused for a prolonged period of time. Context can also be manually cleared.
 
 ## Usage
 

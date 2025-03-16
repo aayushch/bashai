@@ -398,7 +398,8 @@ class BashAI:
     async def setup(self):
         self.llm_client = await LLMClient(self.logger,
                                           self.config).__aenter__()
-        self.system_commands = SystemCommands(self.logger).__enter__()
+        self.system_commands = SystemCommands(
+            self.logger, self.config).__enter__()
 
     async def cleanup(self):
         if self.llm_client:
@@ -416,10 +417,12 @@ class BashAI:
                 context = [{
                     "role": "system",
                     "content": (
-                        "You are a linux system administrator. "
-                        "You have the ability to execute commands "
-                        "on the system and access to a set of tools "
-                        "to help the user with their requests."
+                        "You are a linux system administrator with internet search capabilities. "
+                        "You have the ability to execute commands on the system and access to a set of tools "
+                        "to help the user with their requests. You can search the internet for information "
+                        "using web_search, and analyze webpage content using fetch_webpage method.\n\n"
+                        "When the user asks questions that might require up-to-date information or research, use these "
+                        "internet capabilities to provide helpful and accurate responses."
                     )
                 }]
 
@@ -481,38 +484,6 @@ class BashAI:
                     # Execute command
                     result = await self._execute_command(action)
 
-                    # Add tool call to context
-                    # context.append({
-                    #     "role": "assistant",
-                    #     "function_call": {
-                    #         "name": function,
-                    #         "arguments": parameters
-                    #     }
-                    # })
-
-                    # # Extract the tool output
-                    # status = result["success"]
-
-                    # if not status:
-                    #     if "error" in result:
-                    #         tool_output = result["error"]
-
-                    # if "stdout" in result:
-                    #     tool_output = result["stdout"]
-                    # if "stderr" in result:
-                    #     tool_output = tool_output + result["stderr"]
-
-                    # if len(tool_output) == 0:
-                    #     tool_output = (
-                    #         f"Operation {'success' if status else 'failed'}")
-
-                    # # Append the tool output to the conversation.
-                    # context.append({
-                    #     "role": "tool",
-                    #     "tool_call_id": f"{id}",
-                    #     "content": f"{tool_output}"
-                    # })
-
                     # Append the tool output to the conversation.
                     context.append({
                         "role": "tool",
@@ -563,7 +534,10 @@ class BashAI:
             "compile_code": self.system_commands.compile_code,
             "fetch_url": self.system_commands.fetch_url,
             "execute_command": self.system_commands.execute_command,
-            "execute_code": self.system_commands.execute_code
+            "execute_code": self.system_commands.execute_code,
+            "web_search": self.system_commands.web_search,
+            # "fetch_webpage": self.system_commands.fetch_webpage,
+            "fetch_webpage": self.system_commands.fetch_webpage_rendered
         }
 
         if action not in command_map:
@@ -593,6 +567,7 @@ class Config:
     DEFAULT_CONTEXT_MAX_LENGTH = 4000
     DEFAULT_CONTEXT_MAX_AGE = 24
     DEFAULT_LOGGER_LEVEL = logging.INFO
+    DEFAULT_PLAYWRIGHT_BROWSER = "chromium"
 
     DEFAULT_CONFIG = {
         "llm": {
@@ -607,7 +582,8 @@ class Config:
         },
         "logger": {
             "level": DEFAULT_LOGGER_LEVEL
-        }
+        },
+        "browser": DEFAULT_PLAYWRIGHT_BROWSER
     }
 
     @staticmethod
@@ -656,7 +632,8 @@ async def main():
                 tool.context_manager.remove_current_db()
             elif sys.argv[2] == "--command":
                 # Init system integration
-                system_commands = SystemCommands(tool.logger).__enter__()
+                system_commands = SystemCommands(
+                    tool.logger, config).__enter__()
 
                 # Execute the command and print result.
                 result = await system_commands.execute_command(sys.argv[3])
@@ -665,7 +642,24 @@ async def main():
 
         # Command line mode
         if len(sys.argv) > 1:
+            # Get the user prompt
             command = ' '.join(sys.argv[1:])
+
+            # Check if there is an input on the STDIN.
+            if not sys.stdin.isatty():
+
+                # There is data on the STDIN, add this to context.
+                inp = ''
+                for line in sys.stdin:
+                    inp += line
+
+                # Augment the prompt with the context.
+                command += f"\n```\n{inp}```"
+
+                # Reopen stdin to the terminal for future input() calls
+                sys.stdin = open('/dev/tty')
+
+            # Run the inference.
             result = await tool.process_command(command)
             print(f"{Colors.FG.lightcyan}{result}{Colors.reset}")
             return

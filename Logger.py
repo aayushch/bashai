@@ -51,6 +51,7 @@ class Colors:
         cyan = '\033[46m'
         lightgrey = '\033[47m'
 
+
 class Logger:
     """Simple logging utility for the NL Command Tool."""
 

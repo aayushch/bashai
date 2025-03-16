@@ -6,16 +6,75 @@
 # Created on: February 7, 2025
 
 from typing import List, Dict, Any
-from Logger import Logger
+from Logger import Logger, Colors
 import asyncio
+import aiohttp
+# import json
+import re
+import base64
+from bs4 import BeautifulSoup
+from urllib.parse import urlparse, urljoin
+from duckduckgo_search import DDGS
 from ai_code_sandbox import AICodeSandbox
-import traceback
+import nltk
+# Playwright will be imported dynamically to avoid startup dependency
+# import traceback
 
 
 class Functions:
     @staticmethod
     def get() -> List[Dict[str, Any]]:
         return [
+            {
+                "type": "function",
+                "function": {
+                    "name": "web_search",
+                    "description": "Search the internet for information on a topic",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "query": {
+                                "type": "string",
+                                "description": "The search query"
+                            },
+                            "max_results": {
+                                "type": "number",
+                                "description": "Maximum number of results to return (default 5)"
+                            }
+                        },
+                        "required": ["query"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "fetch_webpage",
+                    "description": "Fetch and extract content from a webpage using a browser that can execute JavaScript",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "url": {
+                                "type": "string",
+                                "description": "URL of the webpage to fetch"
+                            },
+                            "wait_for_selector": {
+                                "type": "string",
+                                "description": "Optional CSS selector to wait for before extracting content"
+                            },
+                            "timeout": {
+                                "type": "number",
+                                "description": "Maximum seconds to wait for the page to load (default 30)"
+                            },
+                            "include_links": {
+                                "type": "boolean",
+                                "description": "Whether to include links found on the page (default false)"
+                            }
+                        },
+                        "required": ["url"]
+                    }
+                }
+            },
             {
                 "type": "function",
                 "function": {
@@ -219,31 +278,6 @@ class Functions:
             {
                 "type": "function",
                 "function": {
-                    "name": "fetch_url",
-                    "description": "Fetch content from a URL using curl",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "url": {
-                                "type": "string",
-                                "description": "URL to fetch"
-                            },
-                            "output": {
-                                "type": "string",
-                                "description": "Output file path (optional)"
-                            },
-                            "headers": {
-                                "type": "object",
-                                "description": "HTTP headers to include"
-                            }
-                        },
-                        "required": ["url"]
-                    }
-                }
-            },
-            {
-                "type": "function",
-                "function": {
                     "name": "execute_command",
                     "description": "Execute any linux command",
                     "parameters": {
@@ -344,17 +378,76 @@ class CommandExecutor:
 class SystemCommands:
     """Implements system commands using the CommandExecutor."""
 
-    def __init__(self, logger: Logger):
+    def __init__(self, logger: Logger, config: Dict[str, Any]):
         self.executor = CommandExecutor(logger)
+        self.config = config
         self.logger = logger
         self.sandbox = None
+        self.session = None
+        self.playwright_installed = False
+
+        # Try to initialize NLTK resources at startup
+        try:
+            nltk.download('punkt', quiet=True)
+            nltk.download('stopwords', quiet=True)
+        except Exception as e:
+            self.logger.warning(f"NLTK resource download failed: {str(e)}")
+
+    async def _ensure_playwright(self):
+        """Ensure Playwright is installed with browser binaries."""
+        # Assume the playwright is installed.
+        return True
+
+        # if self.playwright_installed:
+        #     return True
+
+        # try:
+        #     # Import dynamically to avoid startup dependency
+        #     import playwright
+        #     from playwright.async_api import async_playwright
+
+        #     # Check if browsers are installed and install if needed
+        #     try:
+        #         process = await asyncio.create_subprocess_shell(
+        #             "playwright install chromium",
+        #             stdout=asyncio.subprocess.PIPE,
+        #             stderr=asyncio.subprocess.PIPE
+        #         )
+        #         stdout, stderr = await process.communicate()
+
+        #         if process.returncode != 0:
+        #             self.logger.warning(
+        #                 f"Failed to install Playwright browsers: {stderr.decode()}")
+        #             return False
+
+        #         self.playwright_installed = True
+        #         return True
+
+        #     except Exception as e:
+        #         self.logger.warning(
+        #             f"Failed to install Playwright browsers: {str(e)}")
+        #         return False
+
+        # except ImportError:
+        #     self.logger.warning(
+        #         "Playwright is not installed. Web page rendering "
+        #         "will not be available.")
+        #     return False
 
     def __enter__(self):
         return self
 
-    def __exit__(self,  exc_type, exc_val, exc_tb):
+    async def _ensure_session(self):
+        if self.session is None:
+            self.session = aiohttp.ClientSession()
+        return self.session
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
         if self.sandbox:
             self.sandbox.close()
+
+        if self.session and not self.session.closed:
+            asyncio.create_task(self.session.close())
 
     async def create_file(self, path: str) -> Dict[str, Any]:
         return await self.executor.execute(["touch", path])
@@ -386,7 +479,7 @@ class SystemCommands:
     async def execute_command(self, command: str,
                               args: List[str] = []) -> Dict[str, Any]:
         # Some models may send the command and the args as a string. Some may
-        # set an empty args list as a string '[]'. We will sanitise these
+        # set an empty args list as a string '[]'. We will sanitize these
         # cases here before executing.
         # First split the command if it contains command line args.
         components = command.split()
@@ -399,7 +492,7 @@ class SystemCommands:
         # Get the base command and use rest as args.
         command = components.pop(0)
 
-        # Execute with sanitised inputs.
+        # Execute with sanitized inputs.
         return await self.executor.execute([command, *components])
 
     async def execute_code(self, code: str) -> Dict[str, Any]:
@@ -421,6 +514,10 @@ class SystemCommands:
     ) -> Dict[str, Any]:
         command = [compiler, source, "-o", output]
         if flags:
+            # The model sometime adds a redundant -o flag in the response.
+            # Since we handle -o vai the `output` param, drop any occurrence
+            # of -o from the flags.
+            flags = [item for item in flags if item != "-o"]
             command.extend(flags)
         return await self.executor.execute(command)
 
@@ -436,3 +533,313 @@ class SystemCommands:
             command.extend(["-o", output])
         command.append(url)
         return await self.executor.execute(command)
+
+    async def web_search(self, query: str, max_results: int = 5) -> Dict[str, Any]:
+        """
+        Search the web using DuckDuckGo and return structured results.
+
+        Args:
+            query: The search query
+            max_results: Maximum number of results to return (default 5)
+
+        Returns:
+            Dict containing search results with URLs, titles, and snippets
+        """
+        self.logger.info(f"Performing web search for: {query}")
+        print(f"{Colors.FG.yellow}\nWebSearch: {query}{Colors.reset}")
+
+        try:
+            ddgs = DDGS()
+            results = list(ddgs.text(query, max_results=max_results))
+
+            formatted_results = []
+            for result in results:
+                formatted_results.append({
+                    "title": result.get("title", ""),
+                    "url": result.get("href", ""),
+                    "snippet": result.get("body", "")
+                })
+
+            return {
+                "status": "success",
+                "success": True,
+                "results": formatted_results,
+                "query": query,
+                "total_results": len(formatted_results)
+            }
+
+        except Exception as e:
+            self.logger.error(f"Web search error: {str(e)}")
+            return {
+                "status": "error",
+                "success": False,
+                "error": f"Failed to perform web search: {str(e)}"
+            }
+
+    async def fetch_webpage(self, url: str, include_links: bool = False) -> Dict[str, Any]:
+        """
+        Fetch a webpage, extract and process its content using BeautifulSoup (for static websites).
+
+        Args:
+            url: URL of the webpage to fetch
+            include_links: Whether to include links found on the page
+
+        Returns:
+            Dict containing the processed content and metadata
+        """
+        self.logger.info(f"Fetching webpage (static method): {url}")
+
+        try:
+            # Validate URL
+            parsed_url = urlparse(url)
+            if not parsed_url.scheme or not parsed_url.netloc:
+                raise ValueError(f"Invalid URL: {url}")
+
+            # Get session and fetch content
+            session = await self._ensure_session()
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+            }
+
+            async with session.get(url, headers=headers, timeout=30) as response:
+                if response.status != 200:
+                    return {
+                        "status": "error",
+                        "success": False,
+                        "error": f"Failed to fetch URL (status code {response.status})"
+                    }
+
+                content_type = response.headers.get('Content-Type', '')
+                if 'text/html' not in content_type.lower():
+                    return {
+                        "status": "error",
+                        "success": False,
+                        "error": f"URL does not contain HTML content: {content_type}"
+                    }
+
+                html = await response.text()
+
+            # Parse with BeautifulSoup
+            soup = BeautifulSoup(html, 'html.parser')
+
+            # Remove script, style and other non-content elements
+            for element in soup(['script', 'style', 'meta', 'noscript', 'iframe']):
+                element.decompose()
+
+            # Extract title
+            title = soup.title.string if soup.title else "Untitled"
+
+            # Extract main content
+            # First attempt to get article content
+            article_content = ""
+            article_tags = soup.find_all(['article', 'main', 'div', 'section'])
+            for tag in article_tags:
+                if tag.get_text(strip=True):
+                    article_content = tag.get_text(separator=' ', strip=True)
+                    break
+
+            # If no article content found, use body
+            if not article_content:
+                article_content = soup.body.get_text(
+                    separator=' ', strip=True) if soup.body else ""
+
+            # Process text to remove extra whitespace
+            article_content = re.sub(r'\s+', ' ', article_content).strip()
+
+            # Process text using NLTK to extract sentences if available
+            processed_content = article_content
+            try:
+                from nltk.tokenize import sent_tokenize
+                sentences = sent_tokenize(article_content)
+                # Use only meaningful sentences (more than 5 words)
+                meaningful_sentences = [
+                    s for s in sentences if len(s.split()) > 5]
+                processed_content = " ".join(meaningful_sentences)
+            except Exception as e:
+                self.logger.warning(f"NLTK processing failed: {str(e)}")
+
+            # Collect links if requested
+            links = []
+            if include_links:
+                for link in soup.find_all('a', href=True):
+                    href = link['href']
+                    if href.startswith(('http://', 'https://')):
+                        full_url = href
+                    else:
+                        full_url = urljoin(url, href)
+
+                    link_text = link.get_text(strip=True)
+                    # Avoid empty or single-character links
+                    if link_text and len(link_text) > 1:
+                        links.append({
+                            "url": full_url,
+                            "text": link_text
+                        })
+
+            # Create a summary of the processed content
+            summary = processed_content[:1000] + "..." if len(
+                processed_content) > 1000 else processed_content
+
+            return {
+                "status": "success",
+                "success": True,
+                "url": url,
+                "title": title,
+                "content": processed_content,
+                "summary": summary,
+                "links": links if include_links else []
+            }
+
+        except aiohttp.ClientError as e:
+            self.logger.error(
+                f"Network error while fetching webpage: {str(e)}")
+            return {
+                "status": "error",
+                "success": False,
+                "error": f"Network error: {str(e)}"
+            }
+        except Exception as e:
+            self.logger.error(f"Error fetching webpage: {str(e)}")
+            return {
+                "status": "error",
+                "success": False,
+                "error": f"Failed to process webpage: {str(e)}"
+            }
+
+    async def fetch_webpage_rendered(
+        self, url: str, wait_for_selector: str = None,
+        timeout: int = 30, include_links: bool = False
+    ) -> Dict[str, Any]:
+        """
+        Fetch a webpage using a real browser with JS execution capabilities.
+
+        Args:
+            url: URL of the webpage to fetch
+            wait_for_selector: CSS selector to wait for before extracting content
+            timeout: Maximum seconds to wait for page load
+            include_links: Whether to include links found on the page
+
+        Returns:
+            Dict containing the processed content and metadata
+        """
+        self.logger.info(f"Fetching webpage with browser automation: {url}")
+        print(f"{Colors.FG.yellow}\nFetch URL: {url}{Colors.reset}")
+
+        # Check if Playwright is installed and ready
+        if not await self._ensure_playwright():
+            return {
+                "status": "error",
+                "success": False,
+                "error": "Browser automation is not available. Please install playwright: pip install playwright && playwright install chromium"
+            }
+
+        try:
+            # Import here to avoid dependency at startup
+            from playwright.async_api import async_playwright
+
+            async with async_playwright() as p:
+
+                # Launch the configured browser
+                if self.config["browser"] == "chromium":
+                    browser = await p.chromium.launch(headless=True)
+                elif self.config["browser"] == "firefox":
+                    browser = await p.firefox.launch(headless=True)
+                elif self.config["browser"] == "webkit":
+                    browser = await p.webkit.launch(headless=True)
+
+                page = await browser.new_page()
+
+                # Set user agent to avoid bot detection
+                await page.set_extra_http_headers({
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+                })
+
+                # Navigate to the URL with timeout
+                await page.goto(url, timeout=timeout * 1000, wait_until="networkidle")
+
+                # Wait for specific content if selector provided
+                if wait_for_selector:
+                    await page.wait_for_selector(wait_for_selector, timeout=timeout * 1000)
+                else:
+                    # Default wait a moment for JS to execute
+                    await asyncio.sleep(2)
+
+                # Get page title
+                title = await page.title()
+
+                # Extract the fully rendered HTML content
+                html_content = await page.content()
+
+                # Get main content text
+                body_text = await page.evaluate("""() => {
+                    // Remove script, style elements
+                    const scripts = document.querySelectorAll('script, style, noscript, iframe');
+                    scripts.forEach(s => s.remove());
+
+                    // Try to find main content area
+                    const article = document.querySelector('article, main, [role="main"]');
+                    if (article) {
+                        return article.innerText;
+                    }
+                    return document.body.innerText;
+                }""")
+
+                # Extract links if requested
+                links = []
+                if include_links:
+                    link_elements = await page.query_selector_all('a[href]')
+                    for link in link_elements:
+                        href = await link.get_attribute('href')
+                        text = await link.text_content()
+                        if href and text and len(text.strip()) > 1:
+                            full_url = href if href.startswith(
+                                ('http://', 'https://')) else urljoin(url, href)
+                            links.append({
+                                "url": full_url,
+                                "text": text.strip()
+                            })
+
+                # Take a screenshot for potential further analysis
+                screenshot = await page.screenshot(type="jpeg", quality=50)
+                screenshot_base64 = base64.b64encode(
+                    screenshot).decode('utf-8')
+
+                # Close browser
+                await browser.close()
+
+                # Process text to remove extra whitespace
+                processed_content = re.sub(r'\s+', ' ', body_text).strip()
+
+                # Process text using NLTK to extract sentences if available
+                try:
+                    from nltk.tokenize import sent_tokenize
+                    sentences = sent_tokenize(processed_content)
+                    # Use only meaningful sentences (more than 5 words)
+                    meaningful_sentences = [
+                        s for s in sentences if len(s.split()) > 5]
+                    processed_content = " ".join(meaningful_sentences)
+                except Exception as e:
+                    self.logger.warning(f"NLTK processing failed: {str(e)}")
+
+                # Create a summary
+                summary = processed_content[:1000] + "..." if len(
+                    processed_content) > 1000 else processed_content
+
+                return {
+                    "status": "success",
+                    "success": True,
+                    "url": url,
+                    "title": title,
+                    "content": processed_content,
+                    "summary": summary,
+                    "links": links if include_links else [],
+                    "screenshot_available": True
+                }
+
+        except Exception as e:
+            self.logger.error(f"Error fetching webpage with browser: {str(e)}")
+            return {
+                "status": "error",
+                "success": False,
+                "error": f"Failed to process webpage with browser: {str(e)}"
+            }

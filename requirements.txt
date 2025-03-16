@@ -4,3 +4,7 @@ twine
 pytest
 aiohttp
 psutil
+beautifulsoup4
+duckduckgo-search
+nltk
+playwright

@@ -33,5 +33,20 @@
     "type": "write",
     "description": "Execute a command on the system",
     "requires_confirmation": true
+  },
+  "web_search": {
+    "type": "read",
+    "description": "Search the internet for information",
+    "requires_confirmation": false
+  },
+  "fetch_webpage": {
+    "type": "read",
+    "description": "Fetch and analyze content from a static webpage",
+    "requires_confirmation": false
+  },
+  "fetch_webpage_rendered": {
+    "type": "read",
+    "description": "Fetch and analyze content from a dynamic webpage using a browser",
+    "requires_confirmation": false
   }
 }

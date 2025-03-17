@@ -478,6 +478,20 @@ class SystemCommands:
 
     async def execute_command(self, command: str,
                               args: List[str] = []) -> Dict[str, Any]:
+        """
+        Execute a system command with optional arguments.
+
+        Args:
+            command: The command to execute
+            args: Optional list of command line arguments
+
+        Returns:
+            Dict containing:
+                success: Boolean indicating if command succeeded
+                stdout: Command's stdout output
+                stderr: Command's stderr output
+                return_code: Command's return code
+        """
         # Some models may send the command and the args as a string. Some may
         # set an empty args list as a string '[]'. We will sanitize these
         # cases here before executing.
@@ -496,6 +510,19 @@ class SystemCommands:
         return await self.executor.execute([command, *components])
 
     async def execute_code(self, code: str) -> Dict[str, Any]:
+        """
+        Execute Python code in a sandboxed environment.
+
+        Args:
+            code: String containing Python code to execute
+
+        Returns:
+            Dict containing:
+                success: Boolean indicating if code executed successfully
+                stdout: Code's stdout output
+                stderr: Code's stderr output (empty if successful)
+                return_code: Return code (0 if successful)
+        """
         # Initialize sandbox if this is the first call
         if not self.sandbox:
             self.sandbox = AICodeSandbox(
@@ -512,6 +539,22 @@ class SystemCommands:
         self, source: str, output: str, compiler: str,
         flags: List[str] = None
     ) -> Dict[str, Any]:
+        """
+        Compile source code using gcc/g++.
+
+        Args:
+            source: Path to the source code file
+            output: Path for the compiled output file
+            compiler: Compiler to use ('gcc' or 'g++')
+            flags: Optional list of compiler flags
+
+        Returns:
+            Dict containing:
+                success: Boolean indicating if compilation succeeded
+                stdout: Compiler's stdout output
+                stderr: Compiler's stderr output
+                return_code: Compiler's return code
+        """
         command = [compiler, source, "-o", output]
         if flags:
             # The model sometime adds a redundant -o flag in the response.
@@ -525,6 +568,21 @@ class SystemCommands:
         self, url: str, output: str = None,
         headers: Dict[str, str] = None
     ) -> Dict[str, Any]:
+        """
+        Fetch content from a URL using curl.
+
+        Args:
+            url: URL to fetch content from
+            output: Optional path to save the fetched content
+            headers: Optional dict of HTTP headers to include in request
+
+        Returns:
+            Dict containing:
+                success: Boolean indicating if fetch succeeded
+                stdout: Curl's stdout output (response content if no output file)
+                stderr: Curl's stderr output
+                return_code: Curl's return code
+        """
         command = ["curl"]
         if headers:
             for key, value in headers.items():
@@ -546,7 +604,13 @@ class SystemCommands:
             Dict containing search results with URLs, titles, and snippets
         """
         self.logger.info(f"Performing web search for: {query}")
-        print(f"{Colors.FG.yellow}\nWebSearch: {query}{Colors.reset}")
+        print(f"{Colors.FG.yellow}\nWeb Search: {query}{Colors.reset}")
+        if not query.strip():
+            return {
+                "status": "error",
+                "success": False,
+                "error": "Empty search query"
+            }
 
         try:
             ddgs = DDGS()

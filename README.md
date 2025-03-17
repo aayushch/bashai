@@ -1,6 +1,6 @@
 # Natural Language Command Tool/Agent
 
-A command-line tool that interprets natural language commands and executes them as system operations using a Local Language Model (LLM). This tool can also search the internet, fetch information from webpages, and analyze web content.
+A command-line tool which integrates with terminal/shell and interprets natural language commands and executes them as system operations using a Local Language Model (LLM). This tool can also search the internet, fetch information from webpages, and analyze web content.
 
 ## Features
 
@@ -19,7 +19,7 @@ A command-line tool that interprets natural language commands and executes them 
 
 - Python 3.7+
 - Local LLM server running on http://localhost:1234/v1 (tested with LM Studio)
-- An LLM model which supports tool usage
+- An LLM model which supports tool usage (Recommended Model: Qwen2.5-14B-Instruct)
 - Required Python packages:
   - aiohttp
   - sqlite3
@@ -39,6 +39,7 @@ A command-line tool that interprets natural language commands and executes them 
 cd bashai
 ln -s ai-code-sandbox/ai_code_sandbox
 ```
+
 3. Install dependencies:
 ```bash
 pip install -r requirements.txt
@@ -51,10 +52,33 @@ python3 -m playwright install firefox
 python3 -m playwright install webkit
 ```
 
-5. Contexts and security configuration are maintained in `~/.bashai` folder
-6. Logs are generated in `/tmp`
-7. Contexts are maintained per `shell` and are auto cleaned up if the shell
+## Details
+
+1. Contexts and security configuration are maintained in `~/.bashai` folder
+2. Configs can be overridden by creating a `config.json` file under the `~/.bashai` directory. Sample configs:
+```json
+{
+  "llm": {
+    "api_url": "http://localhost:1234/v1",
+    "model": "local-model",
+    "temperature": 0.7,
+    "max_tokens": 4096
+  },
+  "context": {
+    "max_length": 4000,
+    "max_age_hours": 24
+  },
+  "logger": {
+    "level": 10
+  },
+  "browser": "webkit"
+}
+```
+
+3. Logs are generated in `/tmp`
+4. Contexts are maintained per `shell` and are auto cleaned up if the shell
    is unused for a prolonged period of time. Context can also be manually cleared.
+   See the "Clean Context" section below.
 
 ## Usage
 
@@ -72,7 +96,7 @@ OR
 ```bash
 agent <your prompt>
 ```
-if you modify the `#!` in the agent and `chmod +x` it.
+if you add `agent` to the PATH and `chmod +x` it (recommended).
 
 ### Clean Context
 Clears the context associated with the current shell.
@@ -95,7 +119,7 @@ agent> fetch content from spa-webapp.com using browser rendering
 $ python agent "create a backup of my-file.txt"
 $ python agent "what is the current weather in San Francisco"
 $ python agent "summarize the main points from https://example.com/blog-post"
-$ tail -100 /var/log/syslog | agent analyse the logs
+$ tail -100 /var/log/syslog | agent analyze the logs
 ```
 
 ## Security

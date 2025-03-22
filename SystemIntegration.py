@@ -453,12 +453,15 @@ class SystemCommands:
         return await self.executor.execute(["touch", path])
 
     async def read_file(self, path: str) -> Dict[str, Any]:
+        print(f"{Colors.FG.yellow}\nRead: {path}{Colors.reset}")
         return await self.executor.execute(["cat", path])
 
     async def write_file(self, path: str, data: str) -> Dict[str, Any]:
+        print(f"{Colors.FG.yellow}\nWrite: {path}{Colors.reset}")
         return await self.executor.execute(["echo", f"'{data}'", ">|", path])
 
     async def delete_file(self, path: str) -> Dict[str, Any]:
+        print(f"{Colors.FG.yellow}\nDelete: {path}{Colors.reset}")
         return await self.executor.execute(["rm", path])
 
     async def delete_directory(self, path: str) -> Dict[str, Any]:

@@ -8,3 +8,9 @@ beautifulsoup4
 duckduckgo-search
 nltk
 playwright
+chromadb
+langchain
+langchain_core
+langchain_community
+sentence_transformers
+pypdf

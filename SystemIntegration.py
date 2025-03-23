@@ -22,298 +22,395 @@ import nltk
 
 
 class Functions:
-    @staticmethod
-    def get() -> List[Dict[str, Any]]:
-        return [
-            {
-                "type": "function",
-                "function": {
-                    "name": "web_search",
-                    "description": "Search the internet for information on a topic",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "query": {
-                                "type": "string",
-                                "description": "The search query"
-                            },
-                            "max_results": {
-                                "type": "number",
-                                "description": "Maximum number of results to return (default 5)"
-                            }
+    DEFINITIONS = {
+        "create_rag_collection": {
+            "type": "function",
+            "function": {
+                "name": "create_rag_collection",
+                "description": (
+                    "Create a new RAG (Retrieval Augmented Generation) "
+                    "collection from a file or directory"),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "collection_name": {
+                            "type": "string",
+                            "description": (
+                                "Name of the RAG collection to create")
                         },
-                        "required": ["query"]
-                    }
-                }
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "fetch_webpage",
-                    "description": "Fetch and extract content from a webpage using a browser that can execute JavaScript",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "url": {
-                                "type": "string",
-                                "description": "URL of the webpage to fetch"
-                            },
-                            "wait_for_selector": {
-                                "type": "string",
-                                "description": "Optional CSS selector to wait for before extracting content"
-                            },
-                            "timeout": {
-                                "type": "number",
-                                "description": "Maximum seconds to wait for the page to load (default 30)"
-                            },
-                            "include_links": {
-                                "type": "boolean",
-                                "description": "Whether to include links found on the page (default false)"
-                            }
-                        },
-                        "required": ["url"]
-                    }
-                }
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "create_file",
-                    "description": "Create a new empty file",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "path": {
-                                "type": "string",
-                                "description": "Path to the file"
-                            },
-                        },
-                        "required": ["path"]
-                    }
-                }
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "read_file",
-                    "description": "Read contents of a file from anywhere on the system",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "path": {
-                                "type": "string",
-                                "description": "Path to the file"
-                            },
-                        },
-                        "required": ["path"]
-                    }
-                }
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "write_file",
-                    "description": "Write the specified data into the file at the provided path",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "path": {
-                                "type": "string",
-                                "description": "Path to the file in which to write the data"
-                            },
-                            "data": {
-                                "type": "string",
-                                "description": "The data to write to the file"
-                            }
-                        },
-                        "required": ["path"]
-                    }
-                }
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "delete_file",
-                    "description": "Delete a file",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "path": {
-                                "type": "string",
-                                "description": "Path to the file"
-                            },
-                        },
-                        "required": ["path"]
-                    }
-                }
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "delete_directory",
-                    "description": "Delete a directory and its contents",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "path": {
-                                "type": "string",
-                                "description": "Path to the directory"
-                            },
-                        },
-                        "required": ["path"]
-                    }
-                }
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "copy_file",
-                    "description": "Copy a file from source to destination",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "source": {
-                                "type": "string",
-                                "description": "Source file path"
-                            },
-                            "destination": {
-                                "type": "string",
-                                "description": "Destination path"
-                            }
-                        },
-                        "required": ["source", "destination"]
-                    }
-                }
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "move_file",
-                    "description": "Move a file from source to destination",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "source": {
-                                "type": "string",
-                                "description": "Source file path"
-                            },
-                            "destination": {
-                                "type": "string",
-                                "description": "Destination path"
-                            }
-                        },
-                        "required": ["source", "destination"]
-                    }
-                }
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "check_path_exists",
-                    "description": "Check the existence of a file/folder",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "path": {
-                                "type": "string",
-                                "description": "Path to the file/folder to check for existence"
-                            }
-                        },
-                        "required": ["path"]
-                    }
-                }
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "last_n_lines",
-                    "description": "Read specified number of lines from a file",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "path": {
-                                "type": "string",
-                                "description": "Path to the file from which to read"
-                            },
-                            "count": {
-                                "type": "number",
-                                "description": "Number of lines from the end of the file"
-                            }
-                        },
-                        "required": ["path"]
-                    }
-                }
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "compile_code",
-                    "description": "Compile source code using gcc/g++",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "source": {
-                                "type": "string",
-                                "description": "Source file path"
-                            },
-                            "output": {
-                                "type": "string",
-                                "description": "Output file path"
-                            },
-                            "compiler": {
-                                "type": "string",
-                                "enum": ["gcc", "g++"],
-                                "description": "Compiler to use"
-                            },
-                            "flags": {
-                                "type": "array",
-                                "items": {"type": "string"},
-                                "description": "Compiler flags"
-                            }
-                        },
-                        "required": ["source", "output", "compiler"]
-                    }
-                }
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "execute_command",
-                    "description": "Execute any linux command",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "command": {
-                                "type": "string",
-                                "description": "The linux command to execute"
-                            },
-                            "args": {
-                                "type": "array",
-                                "items": {"type": "string"},
-                                "description": "Command line arguments for the command"
-                            }
-                        },
-                        "required": ["command"]
-                    }
-                }
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "execute_code",
-                    "description": "Execute python code and return whatever is printed on stdout",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "code": {
-                                "type": "string",
-                                "description": "The python code to execute and print results"
-                            }
-                        },
-                        "required": ["code"]
-                    }
+                        "source_path": {
+                            "type": "string",
+                            "description": (
+                                "Path to the file or directory to index")
+                        }
+                    },
+                    "required": ["collection_name", "source_path"]
                 }
             }
+        },
+        "delete_rag_collection": {
+            "type": "function",
+            "function": {
+                "name": "delete_rag_collection",
+                "description": "Delete a RAG collection",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "collection_name": {
+                            "type": "string",
+                            "description": (
+                                "Name of the RAG collection to delete")
+                        }
+                    },
+                    "required": ["collection_name"]
+                }
+            }
+        },
+        "list_rag_collections": {
+            "type": "function",
+            "function": {
+                "name": "list_rag_collections",
+                "description": "List all available RAG collections",
+                "parameters": {
+                    "type": "object",
+                    "properties": {}
+                }
+            }
+        },
+        "web_search": {
+            "type": "function",
+            "function": {
+                "name": "web_search",
+                "description": (
+                    "Search the internet for information on a topic"),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "The search query"
+                        },
+                        "max_results": {
+                            "type": "number",
+                            "description": (
+                                "Maximum number of results to return "
+                                "(default 5)")
+                        }
+                    },
+                    "required": ["query"]
+                }
+            }
+        },
+        "fetch_webpage": {
+            "type": "function",
+            "function": {
+                "name": "fetch_webpage",
+                "description": (
+                    "Fetch and extract content from a webpage using a browser "
+                    "that can execute JavaScript"),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "url": {
+                            "type": "string",
+                            "description": "URL of the webpage to fetch"
+                        },
+                        "wait_for_selector": {
+                            "type": "string",
+                            "description": (
+                                "Optional CSS selector to wait for before "
+                                "extracting content")
+                        },
+                        "timeout": {
+                            "type": "number",
+                            "description": (
+                                "Maximum seconds to wait for the page to load "
+                                "(default 30)")
+                        },
+                        "include_links": {
+                            "type": "boolean",
+                            "description": (
+                                "Whether to include links found on the page "
+                                "(default false)")
+                        }
+                    },
+                    "required": ["url"]
+                }
+            }
+        },
+        "create_file": {
+            "type": "function",
+            "function": {
+                "name": "create_file",
+                "description": "Create a new empty file",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "path": {
+                            "type": "string",
+                            "description": "Path to the file"
+                        }
+                    },
+                    "required": ["path"]
+                }
+            }
+        },
+        "read_file": {
+            "type": "function",
+            "function": {
+                "name": "read_file",
+                "description": (
+                    "Read contents of a file from anywhere on the system"),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "path": {
+                            "type": "string",
+                            "description": "Path to the file"
+                        }
+                    },
+                    "required": ["path"]
+                }
+            }
+        },
+        "write_file": {
+            "type": "function",
+            "function": {
+                "name": "write_file",
+                "description": (
+                    "Write the specified data into the file at the provided "
+                    "path"),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "path": {
+                            "type": "string",
+                            "description": (
+                                "Path to the file in which to write the data")
+                        },
+                        "data": {
+                            "type": "string",
+                            "description": "The data to write to the file"
+                        }
+                    },
+                    "required": ["path"]
+                }
+            }
+        },
+        "delete_file": {
+            "type": "function",
+            "function": {
+                "name": "delete_file",
+                "description": "Delete a file",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "path": {
+                            "type": "string",
+                            "description": "Path to the file"
+                        }
+                    },
+                    "required": ["path"]
+                }
+            }
+        },
+        "delete_directory": {
+            "type": "function",
+            "function": {
+                "name": "delete_directory",
+                "description": "Delete a directory and its contents",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "path": {
+                            "type": "string",
+                            "description": "Path to the directory"
+                        }
+                    },
+                    "required": ["path"]
+                }
+            }
+        },
+        "copy_file": {
+            "type": "function",
+            "function": {
+                "name": "copy_file",
+                "description": "Copy a file from source to destination",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "source": {
+                            "type": "string",
+                            "description": "Source file path"
+                        },
+                        "destination": {
+                            "type": "string",
+                            "description": "Destination path"
+                        }
+                    },
+                    "required": ["source", "destination"]
+                }
+            }
+        },
+        "move_file": {
+            "type": "function",
+            "function": {
+                "name": "move_file",
+                "description": "Move a file from source to destination",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "source": {
+                            "type": "string",
+                            "description": "Source file path"
+                        },
+                        "destination": {
+                            "type": "string",
+                            "description": "Destination path"
+                        }
+                    },
+                    "required": ["source", "destination"]
+                }
+            }
+        },
+        "check_path_exists": {
+            "type": "function",
+            "function": {
+                "name": "check_path_exists",
+                "description": "Check the existence of a file/folder",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "path": {
+                            "type": "string",
+                            "description": (
+                                "Path to the file/folder to check for "
+                                "existence")
+                        }
+                    },
+                    "required": ["path"]
+                }
+            }
+        },
+        "last_n_lines": {
+            "type": "function",
+            "function": {
+                "name": "last_n_lines",
+                "description": "Read specified number of lines from a file",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "path": {
+                            "type": "string",
+                            "description": (
+                                "Path to the file from which to read")
+                        },
+                        "count": {
+                            "type": "number",
+                            "description": (
+                                "Number of lines from the end of the file")
+                        }
+                    },
+                    "required": ["path"]
+                }
+            }
+        },
+        "compile_code": {
+            "type": "function",
+            "function": {
+                "name": "compile_code",
+                "description": "Compile source code using gcc/g++",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "source": {
+                            "type": "string",
+                            "description": "Source file path"
+                        },
+                        "output": {
+                            "type": "string",
+                            "description": "Output file path"
+                        },
+                        "compiler": {
+                            "type": "string",
+                            "enum": ["gcc", "g++"],
+                            "description": "Compiler to use"
+                        },
+                        "flags": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Compiler flags"
+                        }
+                    },
+                    "required": ["source", "output", "compiler"]
+                }
+            }
+        },
+        "execute_command": {
+            "type": "function",
+            "function": {
+                "name": "execute_command",
+                "description": "Execute any linux command",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "command": {
+                            "type": "string",
+                            "description": "The linux command to execute"
+                        },
+                        "args": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": (
+                                "Command line arguments for the command")
+                        }
+                    },
+                    "required": ["command"]
+                }
+            }
+        },
+        "execute_code": {
+            "type": "function",
+            "function": {
+                "name": "execute_code",
+                "description": (
+                    "Execute python code and return whatever is printed on "
+                    "stdout"),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "code": {
+                            "type": "string",
+                            "description": (
+                                "The python code to execute and print results")
+                        }
+                    },
+                    "required": ["code"]
+                }
+            }
+        }
+    }
+
+    @staticmethod
+    def get(tools: List[str] = None) -> List[Dict[str, Any]]:
+        """
+        Convert the static dictionary to the list format expected by the API.
+
+        Args:
+            tools: Optional list of tool/function names to include. If None or
+                   empty, returns all functions.
+
+        Returns:
+            List of function definitions for requested tools or all tools if
+            none specified.
+        """
+        if not tools:
+            return list(Functions.DEFINITIONS.values())
+
+        return [
+            Functions.DEFINITIONS[name]
+            for name in tools
+            if name in Functions.DEFINITIONS
         ]
 
 
@@ -665,10 +762,14 @@ class SystemCommands:
             # Get session and fetch content
             session = await self._ensure_session()
             headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/91.0.4472.124 Safari/537.36")
             }
 
-            async with session.get(url, headers=headers, timeout=30) as response:
+            async with session.get(url, headers=headers,
+                                   timeout=30) as response:
                 if response.status != 200:
                     return {
                         "status": "error",
@@ -690,7 +791,8 @@ class SystemCommands:
             soup = BeautifulSoup(html, 'html.parser')
 
             # Remove script, style and other non-content elements
-            for element in soup(['script', 'style', 'meta', 'noscript', 'iframe']):
+            for element in soup(
+                    ['script', 'style', 'meta', 'noscript', 'iframe']):
                 element.decompose()
 
             # Extract title
@@ -773,6 +875,42 @@ class SystemCommands:
                 "error": f"Failed to process webpage: {str(e)}"
             }
 
+    async def create_rag_collection(self, collection_name: str,
+                                    source_path: str) -> Dict[str, Any]:
+        """Create a new RAG collection"""
+        if not hasattr(self, 'rag_manager'):
+            from RAGManager import RAGManager
+            self.rag_manager = RAGManager(self.logger, self.config)
+
+        print(
+            f"{Colors.FG.yellow}\nCreating RAG collection '{collection_name}' "
+            f"from {source_path}{Colors.reset}")
+        result = await self.rag_manager.create_collection(collection_name,
+                                                          source_path)
+        return result
+
+    async def delete_rag_collection(self,
+                                    collection_name: str) -> Dict[str, Any]:
+        """Delete a RAG collection"""
+        if not hasattr(self, 'rag_manager'):
+            from RAGManager import RAGManager
+            self.rag_manager = RAGManager(self.logger, self.config)
+
+        print(
+            f"{Colors.FG.yellow}\nDeleting RAG collection '{collection_name}'"
+            f"{Colors.reset}")
+        result = await self.rag_manager.delete_collection(collection_name)
+        return result
+
+    async def list_rag_collections(self) -> Dict[str, Any]:
+        """List all available RAG collections"""
+        if not hasattr(self, 'rag_manager'):
+            from RAGManager import RAGManager
+            self.rag_manager = RAGManager(self.logger, self.config)
+
+        result = await self.rag_manager.list_collections()
+        return result
+
     async def fetch_webpage_rendered(
         self, url: str, wait_for_selector: str = None,
         timeout: int = 30, include_links: bool = False
@@ -782,7 +920,7 @@ class SystemCommands:
 
         Args:
             url: URL of the webpage to fetch
-            wait_for_selector: CSS selector to wait for before extracting content
+            wait_for_selector: CSS selector to wait for before extracting data
             timeout: Maximum seconds to wait for page load
             include_links: Whether to include links found on the page
 
@@ -797,7 +935,9 @@ class SystemCommands:
             return {
                 "status": "error",
                 "success": False,
-                "error": "Browser automation is not available. Please install playwright: pip install playwright && playwright install chromium"
+                "error": ("Browser automation is not available. Please "
+                          "install playwright: pip install playwright && "
+                          "playwright install chromium")
             }
 
         try:
@@ -818,15 +958,20 @@ class SystemCommands:
 
                 # Set user agent to avoid bot detection
                 await page.set_extra_http_headers({
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+                    "User-Agent": (
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                        "AppleWebKit/537.36 (KHTML, like Gecko) "
+                        "Chrome/91.0.4472.124 Safari/537.36")
                 })
 
                 # Navigate to the URL with timeout
-                await page.goto(url, timeout=timeout * 1000, wait_until="networkidle")
+                await page.goto(url, timeout=timeout * 1000,
+                                wait_until="networkidle")
 
                 # Wait for specific content if selector provided
                 if wait_for_selector:
-                    await page.wait_for_selector(wait_for_selector, timeout=timeout * 1000)
+                    await page.wait_for_selector(wait_for_selector,
+                                                 timeout=timeout * 1000)
                 else:
                     # Default wait a moment for JS to execute
                     await asyncio.sleep(2)
@@ -860,7 +1005,8 @@ class SystemCommands:
                         text = await link.text_content()
                         if href and text and len(text.strip()) > 1:
                             full_url = href if href.startswith(
-                                ('http://', 'https://')) else urljoin(url, href)
+                                ('http://', 'https://')) else urljoin(url,
+                                                                      href)
                             links.append({
                                 "url": full_url,
                                 "text": text.strip()

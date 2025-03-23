@@ -261,10 +261,16 @@ class LLMClient:
                 "max_tokens": self.config["llm"]["max_tokens"]
             }
 
-            # If the most recent chat in the conversation is the tool's
-            # response then do not add the tool list.
+            # If the most recent prompt is the tool's response to the LLM,
+            # then the only tool we will provide is the fetch_webpage. This is
+            # to coerce the LLM to analyse the input, rather than get
+            # distracted by the tools. fetch_webpage is still made available
+            # because the tools's response may contain a URL which the model
+            # should know how to access.
             if len(context) and context[-1]["role"] != "tool":
                 request["tools"] = self.functions
+            else:
+                request["tools"] = Functions.get(["fetch_webpage"])
 
             self.logger.info(
                 f'Sending request to LLM: {len(request["messages"])} prompts')
@@ -537,7 +543,10 @@ class BashAI:
             "execute_code": self.system_commands.execute_code,
             "web_search": self.system_commands.web_search,
             # "fetch_webpage": self.system_commands.fetch_webpage,
-            "fetch_webpage": self.system_commands.fetch_webpage_rendered
+            "fetch_webpage": self.system_commands.fetch_webpage_rendered,
+            "create_rag_collection": self.system_commands.create_rag_collection,
+            "delete_rag_collection": self.system_commands.delete_rag_collection,
+            "list_rag_collections": self.system_commands.list_rag_collections
         }
 
         if action not in command_map:
@@ -568,6 +577,9 @@ class Config:
     DEFAULT_CONTEXT_MAX_AGE = 24
     DEFAULT_LOGGER_LEVEL = logging.INFO
     DEFAULT_PLAYWRIGHT_BROWSER = "chromium"
+    DEFAULT_EMBEDDINGS_PATH = "embeddings"
+    DEFAULT_EMBEDDINGS_PROVIDER = "huggingface"
+    DEFAULT_EMBEDDINGS_MODEL = "all-MiniLM-L6-v2"
 
     DEFAULT_CONFIG = {
         "llm": {
@@ -583,7 +595,13 @@ class Config:
         "logger": {
             "level": DEFAULT_LOGGER_LEVEL
         },
-        "browser": DEFAULT_PLAYWRIGHT_BROWSER
+        "browser": DEFAULT_PLAYWRIGHT_BROWSER,
+        "rag": {
+            "enabled": True,
+            "provider": DEFAULT_EMBEDDINGS_PROVIDER,
+            "data_directory": f"~/.bashai/{DEFAULT_EMBEDDINGS_PATH}",
+            "model": DEFAULT_EMBEDDINGS_MODEL
+        }
     }
 
     @staticmethod
@@ -592,7 +610,8 @@ class Config:
         def sync(default, custom):
             """ Helper utility to sync configurations """
             for key in default:
-                if key not in custom or type(default[key]) != type(custom[key]):
+                if (key not in custom or
+                        type(default[key]) != type(custom[key])):
                     custom[key] = default[key]
                 elif isinstance(default[key], dict):
                     sync(default[key], custom[key])
@@ -638,6 +657,42 @@ async def main():
                 # Execute the command and print result.
                 result = await system_commands.execute_command(sys.argv[3])
                 print(result)
+            elif sys.argv[2] == "--rag":
+                # RAG mode
+                if len(sys.argv) < 5:
+                    print("Usage: python agent -- --rag <collection> <query>")
+                    return
+
+                collection_name = sys.argv[3]
+                query = ' '.join(sys.argv[4:])
+
+                # Initialize RAG manager
+                from RAGManager import RAGManager
+                rag_manager = RAGManager(tool.logger, tool.config)
+
+                # Get context from RAG collection
+                retrieval_result = await rag_manager.retrieve_context(
+                    query, collection_name)
+
+                if retrieval_result["status"] == "error":
+                    print(
+                        f"{Colors.FG.red}Error: {retrieval_result['message']}"
+                        f"{Colors.reset}")
+                    return
+
+                # Get retrieved contexts
+                contexts = retrieval_result["contexts"]
+
+                # Build the augmented prompt
+                rag_context = "\n\nRelevant context:\n"
+                for ctx in contexts:
+                    rag_context += f"---\n{ctx['content']}\n"
+
+                augmented_query = f"{query}\n{rag_context}"
+
+                # Process the augmented query
+                result = await tool.process_command(augmented_query)
+                print(f"{Colors.FG.lightcyan}{result}{Colors.reset}")
             return
 
         # Command line mode

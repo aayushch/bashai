@@ -14,6 +14,10 @@ A command-line tool which integrates with terminal/shell and interprets natural 
 - Local LLM integration
 - Persistent context management
 - Notification system
+- RAG (Retrieval Augmented Generation) support for enhanced contextual responses
+  - Create and manage document collections
+  - Semantic search across indexed documents
+  - Context-aware responses using local knowledge base
 
 ## Requirements
 
@@ -71,7 +75,15 @@ python3 -m playwright install webkit
   "logger": {
     "level": 10
   },
-  "browser": "webkit"
+  "browser": "webkit",
+  "rag": {
+    "provider": "huggingface",
+    "model": "all-MiniLM-L6-v2",
+    "data_directory": "~/.bashai/embeddings",
+    "chunk_size": 500,
+    "chunk_overlap": 50,
+    "distance_threshold": 0.7
+  }
 }
 ```
 
@@ -98,6 +110,27 @@ agent <your prompt>
 ```
 if you add `agent` to the PATH and `chmod +x` it (recommended).
 
+### RAG Operations
+Create a new collection from documents:
+```bash
+agent "create a RAG collection called 'docs' from the ./documentation folder"
+```
+
+Query using RAG context:
+```bash
+agent "using the 'docs' collection, explain how to configure the logging system"
+```
+
+List available collections:
+```bash
+agent "list all RAG collections"
+```
+
+Delete a collection:
+```bash
+agent "delete the RAG collection named 'docs'"
+```
+
 ### Clean Context
 Clears the context associated with the current shell.
 ```bash
@@ -114,13 +147,54 @@ agent> show me the last 5 lines of /var/log/syslog
 agent> search the web for latest Linux kernel features
 agent> analyze the content from https://example.com/article
 agent> fetch content from spa-webapp.com using browser rendering
+agent> create a RAG collection called 'python-docs' from ./python/docs
+agent> using python-docs collection, explain the asyncio module
 
 # As a command
 $ python agent "create a backup of my-file.txt"
 $ python agent "what is the current weather in San Francisco"
 $ python agent "summarize the main points from https://example.com/blog-post"
 $ tail -100 /var/log/syslog | agent analyze the logs
+$ python agent "index my-project-docs/ as a RAG collection called 'project'"
 ```
+
+## Configuration
+
+The tool can be configured via `~/.bashai/config.json`. Here are the available options:
+
+```json
+{
+  "llm": {
+    "api_url": "http://localhost:1234/v1",
+    "model": "local-model",
+    "temperature": 0.7,
+    "max_tokens": 4096
+  },
+  "context": {
+    "max_length": 4000,
+    "max_age_hours": 24
+  },
+  "logger": {
+    "level": 10
+  },
+  "browser": "webkit",
+  "rag": {
+    "provider": "huggingface",
+    "model": "all-MiniLM-L6-v2",
+    "data_directory": "~/.bashai/embeddings",
+    "chunk_size": 500,
+    "chunk_overlap": 50
+  }
+}
+```
+
+### RAG Configuration Options
+- `provider`: Embedding model provider (currently supports 'huggingface')
+- `model`: The embedding model to use for document indexing
+- `data_directory`: Where to store the embeddings and collections
+- `chunk_size`: Size of text chunks for document splitting
+- `chunk_overlap`: Overlap between consecutive chunks
+- `distance_threshold`: Similarity threshold for retrieval (0-1)
 
 ## Security
 

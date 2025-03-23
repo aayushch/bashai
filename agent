@@ -580,6 +580,8 @@ class Config:
     DEFAULT_EMBEDDINGS_PATH = "embeddings"
     DEFAULT_EMBEDDINGS_PROVIDER = "huggingface"
     DEFAULT_EMBEDDINGS_MODEL = "all-MiniLM-L6-v2"
+    DEFAULT_EMBEDDINGS_CHUNK_SIZE = 1000
+    DEFAULT_EMBEDDINGS_CHUNK_OVERLAP = 200
 
     DEFAULT_CONFIG = {
         "llm": {
@@ -599,8 +601,10 @@ class Config:
         "rag": {
             "enabled": True,
             "provider": DEFAULT_EMBEDDINGS_PROVIDER,
-            "data_directory": f"~/.bashai/{DEFAULT_EMBEDDINGS_PATH}",
-            "model": DEFAULT_EMBEDDINGS_MODEL
+            "model": DEFAULT_EMBEDDINGS_MODEL,
+            "chunk_size": DEFAULT_EMBEDDINGS_CHUNK_SIZE,
+            "chunk_overlap": DEFAULT_EMBEDDINGS_CHUNK_OVERLAP,
+            "data_directory": f"~/.bashai/{DEFAULT_EMBEDDINGS_PATH}"
         }
     }
 

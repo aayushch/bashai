@@ -172,8 +172,8 @@ class RAGManager:
 
             # Split documents
             text_splitter = RecursiveCharacterTextSplitter(
-                chunk_size=1000,
-                chunk_overlap=200
+                chunk_size=self.config["rag"]["chunk_size"],
+                chunk_overlap=self.config["rag"]["chunk_overlap"]
             )
             splits = text_splitter.split_documents(documents)
 

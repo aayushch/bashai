@@ -77,6 +77,33 @@ class Functions:
                 }
             }
         },
+        "query_rag_collection": {
+            "type": "function",
+            "function": {
+                "name": "query_rag_collection",
+                "description": (
+                    "Query a specific RAG (Retrieval-Augmented Generation) "
+                    "collection to retrieve relevant documents or information "
+                    "based on a search query"),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "collection_name": {
+                            "type": "string",
+                            "description": (
+                                "Name of the RAG collection to query from")
+                        },
+                        "query": {
+                            "type": "string",
+                            "description": (
+                                "The search query to retrieve relevant "
+                                "information from the collection")
+                        }
+                    },
+                    "required": ["collection_name", "query"]
+                }
+            }
+        },
         "web_search": {
             "type": "function",
             "function": {
@@ -880,14 +907,34 @@ class SystemCommands:
         """Create a new RAG collection"""
         if not hasattr(self, 'rag_manager'):
             from RAGManager import RAGManager
+
+            # Create a longer timeout for the RAG session to avoid disconnection
+            if hasattr(self, 'session') and self.session:
+                # Pass the existing session to RAGManager
+                shared_session = self.session
+            else:
+                # Create a new session if needed
+                shared_session = None
+
             self.rag_manager = RAGManager(self.logger, self.config)
 
         print(
             f"{Colors.FG.yellow}\nCreating RAG collection '{collection_name}' "
             f"from {source_path}{Colors.reset}")
-        result = await self.rag_manager.create_collection(collection_name,
-                                                          source_path)
-        return result
+
+        # Add delay to ensure LLM session is not overloaded
+        await asyncio.sleep(0.5)
+
+        try:
+            result = await self.rag_manager.create_collection(collection_name,
+                                                              source_path)
+            return result
+        except Exception as e:
+            self.logger.error(f"Error creating RAG collection: {str(e)}")
+            return {
+                "status": "error",
+                "message": f"Failed to create collection: {str(e)}"
+            }
 
     async def delete_rag_collection(self,
                                     collection_name: str) -> Dict[str, Any]:
@@ -909,6 +956,17 @@ class SystemCommands:
             self.rag_manager = RAGManager(self.logger, self.config)
 
         result = await self.rag_manager.list_collections()
+        return result
+
+    async def query_rag_collection(self, collection_name: str,
+                                   query: str) -> Dict[str, Any]:
+        """Query a RAG collection with a specified search query"""
+        if not hasattr(self, 'rag_manager'):
+            from RAGManager import RAGManager
+            self.rag_manager = RAGManager(self.logger, self.config)
+
+        result = await self.rag_manager.retrieve_context(query,
+                                                         collection_name)
         return result
 
     async def fetch_webpage_rendered(

@@ -22,6 +22,7 @@ import aiohttp
 import logging
 import sys
 import psutil
+import traceback
 
 
 class ContextManager:
@@ -222,10 +223,11 @@ class NotificationManager:
     async def process_notifications(self):
         while True:
             notification = await self.notification_queue.get()
+            # @todo
             # For MVP: Simple print to terminal
-            print(
-                f"\n[{notification['level'].upper()}] "
-                f"{notification['message']}")
+            # print(
+            #     f"\n[{notification['level'].upper()}] "
+            #     f"{notification['message']}")
             self.notification_queue.task_done()
 
 
@@ -408,10 +410,38 @@ class BashAI:
             self.logger, self.config).__enter__()
 
     async def cleanup(self):
+        # Create a list of tasks to wait for
+        cleanup_tasks = []
+
+        # Clean up LLM client
         if self.llm_client:
-            await self.llm_client.__aexit__(None, None, None)
+            try:
+                await self.llm_client.__aexit__(None, None, None)
+            except Exception as e:
+                self.logger.error(f"Error closing LLM client: {e}")
+
+        # Clean up system commands and close any remaining sessions
         if self.system_commands:
-            self.system_commands.__exit__(None, None, None)
+            try:
+                self.system_commands.__exit__(None, None, None)
+            except Exception as e:
+                self.logger.error(f"Error closing system commands: {e}")
+
+        # Clean up any other asyncio resources
+        import asyncio
+        for task in asyncio.all_tasks():
+            if task != asyncio.current_task() and not task.done():
+                self.logger.info(
+                    f"Cancelling remaining task: {task.get_name()}")
+                task.cancel()
+                cleanup_tasks.append(task)
+
+        # Wait for all cancelled tasks to complete
+        if cleanup_tasks:
+            try:
+                await asyncio.wait(cleanup_tasks, timeout=2)
+            except Exception as e:
+                self.logger.error(f"Error waiting for cleanup tasks: {e}")
 
     async def process_command(
         self, command: str, is_recursive: bool = False,
@@ -423,12 +453,26 @@ class BashAI:
                 context = [{
                     "role": "system",
                     "content": (
-                        "You are a linux system administrator with internet search capabilities. "
-                        "You have the ability to execute commands on the system and access to a set of tools "
-                        "to help the user with their requests. You can search the internet for information "
-                        "using web_search, and analyze webpage content using fetch_webpage method.\n\n"
-                        "When the user asks questions that might require up-to-date information or research, use these "
-                        "internet capabilities to provide helpful and accurate responses."
+                        "You are a linux system administrator with internet "
+                        "search capabilities and access to a set of tools to "
+                        "work with files and have the ability to execute "
+                        "commands on the system  to help the user with their "
+                        "requests. \n\n"
+                        "You can search the internet for information using "
+                        "web_search, and analyze webpage content using "
+                        "fetch_webpage tool/method.\n\n"
+                        "When the user asks questions that might require "
+                        "up-to-date information or research, use these "
+                        "internet capabilities to provide helpful and "
+                        "accurate responses.\n\n"
+                        "When working with files, never assume or create a "
+                        "path by yourself. If file paths are unclear or "
+                        "ambiguous always ask the user to confirm the "
+                        "inferred path or provide a path to the file.\n\n"
+                        "If you're unsure, acknowledge limitations instead "
+                        "of guessing.\n"
+                        "Focus on understanding the user's intent, even if "
+                        "the question is ambiguous"
                     )
                 }]
 
@@ -519,6 +563,7 @@ class BashAI:
             await self.notification_manager.notify(
                 f"Error processing command: {str(e)}", "error"
             )
+            # print(traceback.format_exc())
             return f"Error: {str(e)}"
 
     async def _execute_command(self, parsed_command: Dict[str, Any]):
@@ -546,7 +591,8 @@ class BashAI:
             "fetch_webpage": self.system_commands.fetch_webpage_rendered,
             "create_rag_collection": self.system_commands.create_rag_collection,
             "delete_rag_collection": self.system_commands.delete_rag_collection,
-            "list_rag_collections": self.system_commands.list_rag_collections
+            "list_rag_collections": self.system_commands.list_rag_collections,
+            "query_rag_collection": self.system_commands.query_rag_collection
         }
 
         if action not in command_map:
@@ -580,8 +626,8 @@ class Config:
     DEFAULT_EMBEDDINGS_PATH = "embeddings"
     DEFAULT_EMBEDDINGS_PROVIDER = "huggingface"
     DEFAULT_EMBEDDINGS_MODEL = "all-MiniLM-L6-v2"
-    DEFAULT_EMBEDDINGS_CHUNK_SIZE = 1000
-    DEFAULT_EMBEDDINGS_CHUNK_OVERLAP = 200
+    DEFAULT_EMBEDDINGS_CHUNK_SIZE = 2048
+    DEFAULT_EMBEDDINGS_CHUNK_OVERLAP = 256
 
     DEFAULT_CONFIG = {
         "llm": {
@@ -604,7 +650,9 @@ class Config:
             "model": DEFAULT_EMBEDDINGS_MODEL,
             "chunk_size": DEFAULT_EMBEDDINGS_CHUNK_SIZE,
             "chunk_overlap": DEFAULT_EMBEDDINGS_CHUNK_OVERLAP,
-            "data_directory": f"~/.bashai/{DEFAULT_EMBEDDINGS_PATH}"
+            "data_directory": f"~/.bashai/{DEFAULT_EMBEDDINGS_PATH}",
+            "ignored_dirs": ["node_modules", ".cache", ".next"],
+            "load_hidden": False
         }
     }
 

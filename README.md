@@ -56,6 +56,16 @@ python3 -m playwright install firefox
 python3 -m playwright install webkit
 ```
 
+5. Install Tesseract.
+Linux:
+```bash
+sudo apt install tesseract
+```
+MacOS:
+```bash
+brew install tesseract
+```
+
 ## Details
 
 1. Contexts and security configuration are maintained in `~/.bashai` folder

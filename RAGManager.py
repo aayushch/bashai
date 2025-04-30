@@ -248,19 +248,21 @@ class LMStudioEmbeddings(Embeddings):
                 # Add a small delay between batches to avoid overwhelming the server
                 if i > 0:
                     await asyncio.sleep(0.5)
-                    
+
                 async with session.post(
                     self.api_url,
                     headers={"Content-Type": "application/json"},
                     json={"input": batch, "model": self.model}
                 ) as response:
                     if response.status != 200:
-                        raise Exception(f"API returned status code {response.status}")
-                    
+                        raise Exception(
+                            f"API returned status code {response.status}")
+
                     data = await response.json()
-                    
+
                     # Extract embeddings from response
-                    batch_embeddings = [item["embedding"] for item in data["data"]]
+                    batch_embeddings = [item["embedding"]
+                                        for item in data["data"]]
                     embeddings.extend(batch_embeddings)
 
             except Exception as e:
@@ -276,13 +278,15 @@ class LMStudioEmbeddings(Embeddings):
     def embed_documents(self, texts: List[str]) -> List[List[float]]:
         """Embed a list of documents using LM Studio API"""
         import asyncio
-        
+
         # We're in an async context, should just return the coroutine
         # and let the caller await it directly
         if asyncio.get_event_loop().is_running():
             if self.logger:
-                self.logger.info("Already in async context, returning coroutine")
+                self.logger.info(
+                    "Already in async context, returning coroutine")
             # Return a dummy coroutine that returns fallback embeddings
+
             async def _run_embed():
                 try:
                     return await self._embed_documents_async(texts)
@@ -291,15 +295,16 @@ class LMStudioEmbeddings(Embeddings):
                         self.logger.error(f"Async embedding error: {str(e)}")
                     return [[0.0] * 1536] * len(texts)
             return asyncio.ensure_future(_run_embed())
-            
+
         # We're not in an async context, create a new event loop
         try:
             # Create a new loop for this thread
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
-            
+
             try:
-                embeddings = loop.run_until_complete(self._embed_documents_async(texts))
+                embeddings = loop.run_until_complete(
+                    self._embed_documents_async(texts))
                 if self._own_session:
                     loop.run_until_complete(self._close_session())
                 return embeddings
@@ -319,14 +324,14 @@ class LMStudioEmbeddings(Embeddings):
     def embed_query(self, text: str) -> List[float]:
         """Embed a single text using LM Studio API"""
         import asyncio
-        
+
         # If we're in an async context
         if asyncio.get_event_loop().is_running():
             # Create an awaitable wrapper
             async def _run_embed_query():
                 result = await self._embed_documents_async([text])
                 return result[0] if result else [0.0] * 1536
-                
+
             return asyncio.ensure_future(_run_embed_query())
         else:
             # Use normal sync approach
@@ -337,31 +342,32 @@ class LMStudioEmbeddings(Embeddings):
 # Define a global embeddings class that can be used across methods
 class SimpleLMStudioEmbeddings:
     """Simple synchronous wrapper for LM Studio embeddings - keeps everything local"""
-    
+
     def __init__(self, api_url, model, batch_size=10, logger=None):
         self.api_url = api_url
         self.model = model
         self.batch_size = batch_size
         self.logger = logger
-        
+
     def embed_documents(self, texts):
         """Process documents in batches with simple synchronous requests"""
         import requests
         import time
-        
+
         all_embeddings = []
-        
+
         # Process in batches
         for i in range(0, len(texts), self.batch_size):
             batch = texts[i:min(i+self.batch_size, len(texts))]
-            
+
             if self.logger:
-                self.logger.info(f"Embedding batch {i//self.batch_size + 1}, size: {len(batch)}")
-            
+                self.logger.info(
+                    f"Embedding batch {i//self.batch_size + 1}, size: {len(batch)}")
+
             # Allow some time between batches
             if i > 0:
                 time.sleep(0.5)
-                
+
             try:
                 # Make synchronous request to local LLM
                 response = requests.post(
@@ -370,23 +376,24 @@ class SimpleLMStudioEmbeddings:
                     json={"input": batch, "model": self.model},
                     timeout=60  # Longer timeout
                 )
-                
+
                 if response.status_code != 200:
-                    raise Exception(f"API returned status code {response.status_code}")
-                    
+                    raise Exception(
+                        f"API returned status code {response.status_code}")
+
                 data = response.json()
                 batch_embeddings = [item["embedding"] for item in data["data"]]
                 all_embeddings.extend(batch_embeddings)
-                
+
             except Exception as e:
                 if self.logger:
                     self.logger.error(f"Error embedding batch: {str(e)}")
                 # Provide fallback embeddings
                 for _ in batch:
                     all_embeddings.append([0.0] * 1536)
-        
+
         return all_embeddings
-        
+
     def embed_query(self, text):
         """Embed a single query"""
         result = self.embed_documents([text])
@@ -417,11 +424,12 @@ class RAGManager:
                 if hasattr(module, 'agent') and hasattr(module.agent, 'llm_client') and \
                    hasattr(module.agent.llm_client, 'session'):
                     self.shared_session = module.agent.llm_client.session
-                    self.logger.info("Using shared aiohttp session from LLMClient")
+                    self.logger.info(
+                        "Using shared aiohttp session from LLMClient")
                     break
         except Exception as e:
             self.logger.warning(f"Could not access shared session: {e}")
-            
+
         if self.embedding_provider.lower() == "lmstudio":
             self.logger.info(
                 f"Using LM Studio embeddings from {self.lm_studio_url}")
@@ -513,49 +521,53 @@ class RAGManager:
 
             # Create vectorstore
             collection_path = os.path.join(self.data_dir, collection_name)
-            
+
             # Use simpler synchronous approach with local LLM for embeddings
-            self.logger.info("Using local LM Studio for embeddings - simplifying process")
-            
+            self.logger.info(
+                "Using local LM Studio for embeddings - simplifying process")
+
             # Use our global SimpleLMStudioEmbeddings class
-            
+
             # Create our simple embeddings wrapper using the LM Studio URL
             safe_embeddings = SimpleLMStudioEmbeddings(
                 api_url=self.lm_studio_url,
                 model="embedding-model",
                 logger=self.logger
             )
-            
+
             # Process in manageable batches to prevent memory issues
             import asyncio
             import tempfile
             import shutil
-            
+
             # Create temporary working directory
             temp_dir = tempfile.mkdtemp(dir=os.path.dirname(collection_path))
-            self.logger.info(f"Using temporary directory for processing: {temp_dir}")
-            
+            self.logger.info(
+                f"Using temporary directory for processing: {temp_dir}")
+
             try:
                 # Process in smaller batches with controlled batch size
                 batch_size = 5  # Small batch size for stability
                 total_batches = (len(splits) + batch_size - 1) // batch_size
-                
+
                 for i in range(0, len(splits), batch_size):
                     batch = splits[i:min(i+batch_size, len(splits))]
                     current_batch = i // batch_size + 1
-                    self.logger.info(f"Processing document batch {current_batch}/{total_batches}")
-                    
+                    self.logger.info(
+                        f"Processing document batch {current_batch}/{total_batches}")
+
                     # Add delay between batches to allow system breathing room
                     if i > 0:
                         await asyncio.sleep(1)
-                    
+
                     try:
                         # Use our local embeddings
                         db = Chroma.from_documents(
                             documents=batch,
                             embedding=safe_embeddings,
                             persist_directory=temp_dir,
-                            client_settings=Settings(anonymized_telemetry=False)
+                            client_settings=Settings(
+                                anonymized_telemetry=False)
                         )
                         # Explicitly call persist on the Chroma instance
                         try:
@@ -565,19 +577,23 @@ class RAGManager:
                             elif hasattr(db, "_persist"):
                                 db._persist()
                             else:
-                                self.logger.warning("No persist method found on Chroma, collection may not be saved")
+                                self.logger.warning(
+                                    "No persist method found on Chroma, collection may not be saved")
                         except Exception as persist_error:
-                            self.logger.error(f"Error persisting batch: {str(persist_error)}")
+                            self.logger.error(
+                                f"Error persisting batch: {str(persist_error)}")
                     except Exception as batch_error:
-                        self.logger.error(f"Error processing batch {current_batch}: {str(batch_error)}")
+                        self.logger.error(
+                            f"Error processing batch {current_batch}: {str(batch_error)}")
                         # Continue with next batch
-                
+
                 # Move completed index to final location
-                self.logger.info("Processing complete, moving to final location")
+                self.logger.info(
+                    "Processing complete, moving to final location")
                 if os.path.exists(collection_path):
                     shutil.rmtree(collection_path)
                 shutil.move(temp_dir, collection_path)
-                
+
                 # Open final vectorstore without explicitly setting embeddings
                 # This avoids issues with embeddings initialization
                 try:
@@ -593,21 +609,23 @@ class RAGManager:
                         embedding_function=safe_embeddings,
                         client_settings=Settings(anonymized_telemetry=False)
                     )
-                
+
                 self.logger.info(f"Collection created at {collection_path}")
-                
+
             except Exception as e:
-                self.logger.error(f"Error during collection creation: {str(e)}")
+                self.logger.error(
+                    f"Error during collection creation: {str(e)}")
                 import traceback
                 self.logger.error(traceback.format_exc())
-                
+
                 # Clean up temporary directory
                 if os.path.exists(temp_dir):
                     try:
                         shutil.rmtree(temp_dir)
                     except Exception as cleanup_error:
-                        self.logger.error(f"Error cleaning up temp dir: {cleanup_error}")
-                
+                        self.logger.error(
+                            f"Error cleaning up temp dir: {cleanup_error}")
+
                 # Re-raise to be handled by the outer catch
                 raise
 
@@ -703,8 +721,9 @@ class RAGManager:
                 embedding_function=safe_embeddings,
                 client_settings=Settings(anonymized_telemetry=False)
             )
-            
-            self.logger.info(f"Searching collection '{collection_name}' for: {query}")
+
+            self.logger.info(
+                f"Searching collection '{collection_name}' for: {query}")
 
             # Retrieve documents
             docs = vectorstore.similarity_search(query, k=top_k)

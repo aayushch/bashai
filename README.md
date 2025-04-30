@@ -24,6 +24,7 @@ A command-line tool which integrates with terminal/shell and interprets natural 
 - Python 3.7+
 - Local LLM server running on http://localhost:1234/v1 (tested with LM Studio)
 - An LLM model which supports tool usage (Recommended Model: Qwen2.5-14B-Instruct)
+- An embedding model (Recommended: text-embedding-nomic-embed-text-v1.5-embedding)
 - Required Python packages:
   - aiohttp
   - sqlite3
@@ -103,6 +104,7 @@ brew install tesseract
    See the "Clean Context" section below.
 
 ## Usage
+- Make sure LM Studio is running and the LLM and embedding model is loaded.
 
 ### Interactive Shell Mode
 

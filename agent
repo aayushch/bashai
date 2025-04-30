@@ -22,6 +22,7 @@ import aiohttp
 import logging
 import sys
 import psutil
+import re
 import traceback
 
 
@@ -768,7 +769,14 @@ async def main():
 
             # Run the inference.
             result = await tool.process_command(command)
-            print(f"{Colors.FG.lightcyan}{result}{Colors.reset}")
+            responses = re.split(r'(<think>.*?</think>)',
+                                 result, flags=re.DOTALL)
+            for response in responses:
+                if (response.startswith('<think>') and
+                        response.endswith('</think>')):
+                    print(f"{Colors.FG.darkcyan}{response}{Colors.reset}")
+                else:
+                    print(f"{Colors.FG.lightcyan}{response}{Colors.reset}")
             return
 
         # Interactive shell mode

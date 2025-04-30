@@ -40,6 +40,7 @@ class Colors:
         lightblue = '\033[94m'
         pink = '\033[95m'
         lightcyan = '\033[96m'
+        darkcyan = '\033[38;5;23m'
 
     class BG:
         black = '\033[40m'

@@ -26,14 +26,32 @@ A command-line tool which integrates with terminal/shell and interprets natural 
 - An LLM model which supports tool usage (Recommended Model: Qwen2.5-14B-Instruct)
 - An embedding model (Recommended: text-embedding-nomic-embed-text-v1.5-embedding)
 - Required Python packages:
+  - docker
+  - setuptools
+  - twine
+  - pytest
   - aiohttp
-  - sqlite3
   - psutil
-  - typing
   - beautifulsoup4
   - duckduckgo-search
   - nltk
   - playwright (for browser-based web page rendering)
+  - chromadb
+  - langchain
+  - langchain_core
+  - langchain_community
+  - sentence_transformers
+  - pypdf
+  - jq
+  - unstructured
+  - pdfminer.six
+  - pi_heif
+  - unstructured_pytesseract
+  - pdf2image
+  - pytesseract
+  - opencv-python
+  - tesserocr
+  - unstructured-inference (Has some issues on Ubuntu ARM 64)
 - Includes `ai_code_sandbox` as a submodule to execute python code in a sandbox.
 
 ## Installation
@@ -154,7 +172,7 @@ agent "delete the RAG collection named 'docs'"
 ### Clean Context
 Clears the context associated with the current shell.
 ```bash
-python agent -- --clean
+agent -- --clean
 ```
 
 ## Examples
@@ -171,11 +189,11 @@ agent> create a RAG collection called 'python-docs' from ./python/docs
 agent> using python-docs collection, explain the asyncio module
 
 # As a command
-$ python agent "create a backup of my-file.txt"
-$ python agent "what is the current weather in San Francisco"
-$ python agent "summarize the main points from https://example.com/blog-post"
+$ agent "create a backup of my-file.txt"
+$ agent "what is the current weather in San Francisco"
+$ agent "summarize the main points from https://example.com/blog-post"
 $ tail -100 /var/log/syslog | agent analyze the logs
-$ python agent "index my-project-docs/ as a RAG collection called 'project'"
+$ agent "index my-project-docs/ as a RAG collection called 'project'"
 ```
 
 ## Configuration

@@ -65,6 +65,7 @@ python3 -m playwright install webkit
 ```
 
 5. Install Tesseract.
+
 Linux:
 ```bash
 sudo apt install tesseract

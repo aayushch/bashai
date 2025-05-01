@@ -42,6 +42,7 @@ A command-line tool which integrates with terminal/shell and interprets natural 
 2. Create a soft link for ai_code_sandbox:
 ```bash
 cd bashai
+git submodule update --init
 ln -s ai-code-sandbox/ai_code_sandbox
 ```
 

@@ -18,9 +18,9 @@ jq
 unstructured
 pdfminer.six
 pi_heif
-unstructured-inference
 unstructured_pytesseract
 pdf2image
 pytesseract
 opencv-python
 tesserocr
+unstructured-inference

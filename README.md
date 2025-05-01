@@ -50,6 +50,12 @@ ln -s ai-code-sandbox/ai_code_sandbox
 ```bash
 pip install -r requirements.txt
 ```
+Note: If you have an "externally-managed-environment" you might need to create
+a virtual environment for python, for your pip to work.
+```bash
+python3 -m venv .
+source bin/activate
+```
 
 4. Install playwright browser depending on your platform and preference.
 ```bash

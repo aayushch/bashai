@@ -251,8 +251,9 @@ class LLMClient:
         if self.session:
             await self.session.close()
 
-    async def process_command(self,
-                              context: List[Dict[str, str]]) -> Dict[str, Any]:
+    async def process_command(
+            self, context: List[Dict[str, str]],
+            failed_tools: List[str] = None) -> Dict[str, Any]:
         """Process a command through the LLM."""
         try:
             # Construct the API request
@@ -270,10 +271,21 @@ class LLMClient:
             # distracted by the tools. fetch_webpage is still made available
             # because the tools's response may contain a URL which the model
             # should know how to access.
-            if len(context) and context[-1]["role"] != "tool":
-                request["tools"] = self.functions
-            else:
-                request["tools"] = Functions.get(["fetch_webpage"])
+            # if len(context) and context[-1]["role"] != "tool":
+            #     request["tools"] = self.functions
+            # else:
+            #     tools = ["fetch_webpage"]
+            #     if failed_tools is not None:
+            #         tools.extend(failed_tools)
+            #     request["tools"] = Functions.get(tools)
+            '''
+            The approach above (where we are selectively adding tools based on
+            where its a user or a tool response) provides mixed results. In
+            some cases it helps the LLM infer better but in some cases lack of
+            tools results in suboptimal responses. For now, I am just letting
+            tools be part of every response.
+            '''
+            request["tools"] = self.functions
 
             self.logger.info(
                 f'Sending request to LLM: {len(request["messages"])} prompts')
@@ -446,7 +458,8 @@ class BashAI:
 
     async def process_command(
         self, command: str, is_recursive: bool = False,
-        context: List[Dict[str, str]] = None
+        context: List[Dict[str, str]] = None,
+        failed_actions: List[str] = None
     ):
         try:
             # Initialize context if not provided
@@ -454,27 +467,50 @@ class BashAI:
                 context = [{
                     "role": "system",
                     "content": (
-                        "You are a linux system administrator with internet "
-                        "search capabilities and access to a set of tools to "
-                        "work with files and have the ability to execute "
-                        "commands on the system  to help the user with their "
-                        "requests. \n\n"
-                        "You can search the internet for information using "
-                        "web_search, and analyze webpage content using "
-                        "fetch_webpage tool/method.\n\n"
-                        "When the user asks questions that might require "
-                        "up-to-date information or research, use these "
-                        "internet capabilities to provide helpful and "
-                        "accurate responses.\n\n"
-                        "When working with files, never assume or create a "
-                        "path by yourself. If file paths are unclear or "
-                        "ambiguous always ask the user to confirm the "
-                        "inferred path or provide a path to the file.\n\n"
-                        "If you're unsure, acknowledge limitations instead "
-                        "of guessing.\n"
-                        "Focus on understanding the user's intent, even if "
-                        "the question is ambiguous"
-                    )
+                        "You are an experienced Linux system administrator "
+                        "with internet search capabilities and access to "
+                        "system tools. Your primary goal is to help users "
+                        "with Linux administration tasks, troubleshooting, "
+                        "and best practices.\n"
+                        "CAPABILITIES:\n"
+                        "- Search the internet for up-to-date information "
+                        "using web_search\n"
+                        "- Analyze webpage content using fetch_webpage\n"
+                        "- Execute system commands when authorized\n"
+                        "- Work with files for configuration, logs, and "
+                        "system management\n"
+                        "- Provide step-by-step guidance on Linux "
+                        "administration tasks\n\n"
+                        "GUIDELINES:\n"
+                        "- File paths: Never assume or create paths. If "
+                        "paths are unclear, ask for confirmation or request "
+                        "the user to provide the exact path.\n"
+                        "- Security focus: Prioritize secure practices in "
+                        "all recommendations.\n"
+                        "- When working on production systems: Suggest "
+                        "testing commands in a safe environment first.\n"
+                        "- Permissions: Always consider appropriate "
+                        "permission levels for commands and files.\n"
+                        "- Documentation: Include explanations of what "
+                        "commands do, not just the syntax.\n\n"
+                        "INTERACTION STYLE:\n"
+                        "- Be precise and concise in technical explanations\n"
+                        "- Use code blocks for commands and file content\n"
+                        "- When possible, offer both command-line and "
+                        "configuration file approaches\n"
+                        "- For complex tasks, break solutions into clear "
+                        "sequential steps\n"
+                        "- If unsure, acknowledge limitations rather than "
+                        "guessing\n"
+                        "- Focus on understanding user intent, even with "
+                        "ambiguous queries\n"
+                        "- Offer relevant troubleshooting steps when "
+                        "appropriate\n\n"
+                        "When the user asks questions requiring current "
+                        "information(package versions, recent "
+                        "vulnerabilities, etc.), utilize your internet "
+                        "search capabilities to provide accurate and "
+                        "up-to-date responses.")
                 }]
 
                 # Only add previous context if this isn't a recursive call
@@ -498,7 +534,8 @@ class BashAI:
                     })
 
             # Process through LLM
-            llm_response = await self.llm_client.process_command(context)
+            llm_response = await self.llm_client.process_command(
+                context, failed_actions)
 
             if "actions" in llm_response:
                 # Update the context
@@ -518,6 +555,7 @@ class BashAI:
                 })
 
                 # Perform each action.
+                failed_actions = []
                 for action in llm_response["actions"]:
                     id = action["id"]
                     function = action["function"]
@@ -535,6 +573,15 @@ class BashAI:
                     # Execute command
                     result = await self._execute_command(action)
 
+                    # Keep track of actions which have failed. We will allow
+                    # tools related to these actions to be part tools in the
+                    # prompt. This is for cases when the failure might be
+                    # because of formatting and the LLM can figure out the
+                    # right way to make a call, providing access to the tool
+                    # will help facilitate the LLM to retry.
+                    if result["success"] is False:
+                        failed_actions.append(action)
+
                     # Append the tool output to the conversation.
                     context.append({
                         "role": "tool",
@@ -547,7 +594,9 @@ class BashAI:
                     "Please interpret these results and "
                     "continue helping the user.",
                     is_recursive=True,
-                    context=context  # Pass the current context
+                    context=context,  # Pass the current context
+                    failed_actions=failed_actions if len(
+                        failed_actions) else None
                 )
                 self.context_manager.store_command(
                     command, final_response, "success")
@@ -577,7 +626,9 @@ class BashAI:
             "create_file": self.system_commands.create_file,
             "read_file": self.system_commands.read_file,
             "write_file": self.system_commands.write_file,
+            "append_file": self.system_commands.append_file,
             "delete_file": self.system_commands.delete_file,
+            "list_directory": self.system_commands.list_directory,
             "delete_directory": self.system_commands.delete_directory,
             "copy_file": self.system_commands.copy_file,
             "move_file": self.system_commands.move_file,

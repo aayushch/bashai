@@ -200,6 +200,25 @@ class Functions:
                 }
             }
         },
+        "list_directory": {
+            "type": "function",
+            "function": {
+                "name": "list_directory",
+                "description": (
+                    "List the contents of the specified directory. The current "
+                    "directory is represented by a '.'"),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "path": {
+                            "type": "string",
+                            "description": "Path to the directory to list"
+                        }
+                    },
+                    "required": ["path"]
+                }
+            }
+        },
         "write_file": {
             "type": "function",
             "function": {
@@ -218,6 +237,30 @@ class Functions:
                         "data": {
                             "type": "string",
                             "description": "The data to write to the file"
+                        }
+                    },
+                    "required": ["path"]
+                }
+            }
+        },
+        "append_file": {
+            "type": "function",
+            "function": {
+                "name": "append_file",
+                "description": (
+                    "Append the specified data into the file at the provided "
+                    "path"),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "path": {
+                            "type": "string",
+                            "description": (
+                                "Path to the file in which to append the data")
+                        },
+                        "data": {
+                            "type": "string",
+                            "description": "The data to append to the file"
                         }
                     },
                     "required": ["path"]
@@ -323,7 +366,7 @@ class Functions:
             "type": "function",
             "function": {
                 "name": "last_n_lines",
-                "description": "Read specified number of lines from a file",
+                "description": "Read last 'n' number of lines from a file",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -434,9 +477,12 @@ class Functions:
         if not tools:
             return list(Functions.DEFINITIONS.values())
 
+        # Convert to set to remove duplicates, then back to list
+        unique_tools = list(set(tools))
+
         return [
             Functions.DEFINITIONS[name]
-            for name in tools
+            for name in unique_tools
             if name in Functions.DEFINITIONS
         ]
 
@@ -584,9 +630,17 @@ class SystemCommands:
         print(f"{Colors.FG.yellow}\nWrite: {path}{Colors.reset}")
         return await self.executor.execute(["echo", f"'{data}'", ">|", path])
 
+    async def append_file(self, path: str, data: str) -> Dict[str, Any]:
+        print(f"{Colors.FG.yellow}\nWrite: {path}{Colors.reset}")
+        return await self.executor.execute(["echo", f"'{data}'", ">>", path])
+
     async def delete_file(self, path: str) -> Dict[str, Any]:
         print(f"{Colors.FG.yellow}\nDelete: {path}{Colors.reset}")
         return await self.executor.execute(["rm", path])
+
+    async def list_directory(self, path: str) -> Dict[str, Any]:
+        print(f"{Colors.FG.yellow}\nList: {path}{Colors.reset}")
+        return await self.executor.execute(["ls", "-lrt", path])
 
     async def delete_directory(self, path: str) -> Dict[str, Any]:
         return await self.executor.execute(["rm", "-r", path])

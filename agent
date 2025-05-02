@@ -605,8 +605,19 @@ class BashAI:
             elif "content" in llm_response:
                 # Store in context
                 result = llm_response["content"]
+
+                # Do not add reasoning content into the context.
+                responses = re.split(
+                    r'(<think>.*?</think>)', result, flags=re.DOTALL)
+                content = ''
+                for response in responses:
+                    if (response.startswith('<think>') and
+                       response.endswith('</think>')):
+                        continue
+                    content += response
+
                 self.context_manager.store_command(
-                    command, result, "success")
+                    command, content, "success")
                 return result
 
         except Exception as e:
